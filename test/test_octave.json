@@ -1,0 +1,38 @@
+{
+  "codec": "adpcm-b",
+  "sample_rate": 16000,
+  "boundary": 256,
+  "output_bin": "output/test_octave.bin",
+  "output_json": "output/test_octave.json",
+  "wav_files": [
+    {
+      "path": "test/wav/test_c5_523hz.wav",
+      "name": "auto_C5_oct4",
+      "root_note": "auto",
+      "octave": 4
+    },
+    {
+      "path": "test/wav/test_e4_329hz.wav",
+      "name": "fixed_E4_oct3",
+      "root_note": "E4",
+      "octave": 3
+    },
+    {
+      "path": "test/wav/test_a4_440hz.wav",
+      "name": "int_69_oct3",
+      "root_note": 69,
+      "octave": 3
+    },
+    {
+      "path": "test/wav/test_a4_440hz.wav",
+      "name": "oct_none_explicit",
+      "root_note": "A4",
+      "octave": "none"
+    },
+    {
+      "path": "test/wav/test_a4_440hz.wav",
+      "name": "oct_omitted",
+      "root_note": "A4"
+    }
+  ]
+}

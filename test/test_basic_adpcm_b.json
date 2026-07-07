@@ -1,0 +1,12 @@
+{
+  "codec": "adpcm-b",
+  "sample_rate": 16000,
+  "boundary": 256,
+  "output_bin": "output/test_basic_adpcm_b.bin",
+  "output_json": "output/test_basic_adpcm_b.json",
+  "wav_files": [
+    { "path": "test/wav/test_440hz_44100_mono.wav",   "name": "se_440hz_mono_44100" },
+    { "path": "test/wav/test_880hz_22050_stereo.wav", "name": "se_880hz_stereo_22050" },
+    { "path": "test/wav/test_1khz_48000_mono.wav",    "name": "se_1khz_mono_48000" }
+  ]
+}

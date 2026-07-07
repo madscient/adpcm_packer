@@ -1,0 +1,12 @@
+{
+  "codec": "adpcm-b",
+  "sample_rate": 16000,
+  "boundary": 256,
+  "output_bin": "output/test_shorthand.bin",
+  "output_json": "output/test_shorthand.json",
+  "wav_files": [
+    "test/wav/test_440hz_44100_mono.wav",
+    "test/wav/test_880hz_22050_stereo.wav",
+    "test/wav/test_1khz_48000_mono.wav"
+  ]
+}

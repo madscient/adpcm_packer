@@ -1,0 +1,29 @@
+{
+  "codec": "adpcm-b",
+  "sample_rate": 16000,
+  "boundary": 256,
+  "output_bin": "output/test_rootnote_auto.bin",
+  "output_json": "output/test_rootnote_auto.json",
+  "wav_files": [
+    {
+      "path": "test/wav/test_a4_440hz.wav",
+      "name": "auto_A4",
+      "root_note": "auto"
+    },
+    {
+      "path": "test/wav/test_e4_329hz.wav",
+      "name": "auto_E4",
+      "root_note": "auto"
+    },
+    {
+      "path": "test/wav/test_c5_523hz.wav",
+      "name": "auto_C5",
+      "root_note": "auto"
+    },
+    {
+      "path": "test/wav/test_noise.wav",
+      "name": "auto_noise_fallback",
+      "root_note": "auto"
+    }
+  ]
+}
