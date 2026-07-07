@@ -33,11 +33,14 @@ target_include_directories(nlohmann_json INTERFACE
 # adpcm_packer 実行ファイル
 # ------------------------------------------------------------
 add_executable(adpcm_packer
-    main.cpp
-    codec.cpp
-    codec.h
+    src/main.cpp
+    src/codec.cpp
+    src/codec.h
+    src/wav_reader.h
+    src/pitch_estimator.h
 )
 
+target_include_directories(adpcm_packer PRIVATE src)
 target_link_libraries(adpcm_packer PRIVATE nlohmann_json)
 
 # ------------------------------------------------------------

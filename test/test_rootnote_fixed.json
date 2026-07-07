@@ -1,0 +1,34 @@
+{
+  "codec": "adpcm-b",
+  "sample_rate": 16000,
+  "boundary": 256,
+  "output_bin": "output/test_rootnote_fixed.bin",
+  "output_json": "output/test_rootnote_fixed.json",
+  "wav_files": [
+    {
+      "path": "test/wav/test_a4_440hz.wav",
+      "name": "int_A4",
+      "root_note": 69
+    },
+    {
+      "path": "test/wav/test_a4_440hz.wav",
+      "name": "int_min",
+      "root_note": 0
+    },
+    {
+      "path": "test/wav/test_a4_440hz.wav",
+      "name": "int_max",
+      "root_note": 127
+    },
+    {
+      "path": "test/wav/test_a4_440hz.wav",
+      "name": "explicit_none",
+      "root_note": "none"
+    },
+    {
+      "path": "test/wav/test_a4_440hz.wav",
+      "name": "omitted"
+    },
+    "test/wav/test_a4_440hz.wav"
+  ]
+}

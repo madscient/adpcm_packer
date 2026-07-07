@@ -1,0 +1,10 @@
+{
+  "codec": "adpcm-b",
+  "sample_rate": 8000,
+  "boundary": 256,
+  "output_bin": "output/test_samplerate_8k.bin",
+  "output_json": "output/test_samplerate_8k.json",
+  "wav_files": [
+    { "path": "test/wav/test_440hz_44100_mono.wav", "name": "se_440hz" }
+  ]
+}

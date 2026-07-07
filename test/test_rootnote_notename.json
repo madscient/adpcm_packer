@@ -1,0 +1,19 @@
+{
+  "codec": "adpcm-b",
+  "sample_rate": 16000,
+  "boundary": 256,
+  "output_bin": "output/test_rootnote_notename.bin",
+  "output_json": "output/test_rootnote_notename.json",
+  "wav_files": [
+    { "path": "test/wav/test_a4_440hz.wav", "name": "uppercase_A4",  "root_note": "A4"  },
+    { "path": "test/wav/test_a4_440hz.wav", "name": "lowercase_a4",  "root_note": "a4"  },
+    { "path": "test/wav/test_e4_329hz.wav", "name": "natural_E4",    "root_note": "E4"  },
+    { "path": "test/wav/test_e4_329hz.wav", "name": "sharp_Ds4",     "root_note": "D#4" },
+    { "path": "test/wav/test_e4_329hz.wav", "name": "flat_Eb4",      "root_note": "Eb4" },
+    { "path": "test/wav/test_a4_440hz.wav", "name": "sharp_As3",     "root_note": "A#3" },
+    { "path": "test/wav/test_a4_440hz.wav", "name": "flat_Bb3",      "root_note": "Bb3" },
+    { "path": "test/wav/test_a4_440hz.wav", "name": "boundary_Cm1",  "root_note": "C-1" },
+    { "path": "test/wav/test_a4_440hz.wav", "name": "boundary_G9",   "root_note": "G9"  },
+    { "path": "test/wav/test_c5_523hz.wav", "name": "natural_C5",    "root_note": "C5"  }
+  ]
+}
