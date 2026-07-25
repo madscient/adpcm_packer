@@ -18,6 +18,7 @@
 #include <memory>
 #include <stdexcept>
 #include <algorithm>
+#include <utility>
 
 using json = nlohmann::json;
 
@@ -52,6 +53,37 @@ enum class LoopMode {
     Fixed,  // {"start_sample":N,"end_sample":M}: 明示指定 (リサンプリング後サンプル単位)
 };
 
+// codec + format の組み合わせを一意に解決した内部表現。
+// エンコーダの選択、sample_rate の範囲チェック、出力JSONの
+// 追加フィールド判定に使う。
+enum class CodecKind {
+    AdpcmB,       // YM2608/YM2610 ADPCM-B (YmDeltaTEncoder)
+    AdpcmA,       // YM2610 ADPCM-A (Ym2610AEncoder)
+    Ymz280Adpcm,  // YMZ280B 4bit ADPCM
+    Ymz280Pcm8,   // YMZ280B 8bit リニアPCM
+    Ymz280Pcm16,  // YMZ280B 16bit リニアPCM (リトルエンディアン)
+    Opl4Pcm8,     // OPL4/YMF278B 8bit リニアPCM
+    Opl4Pcm12,    // OPL4/YMF278B 12bit リニアPCM (パック)
+    Opl4Pcm16,    // OPL4/YMF278B 16bit リニアPCM (ビッグエンディアン)
+};
+
+// CodecKind が per-entry sample_rate 上書き・出力JSONへの
+// format/sample_rate 追加フィールドの対象かどうか
+static bool codecSupportsPerEntryRate(CodecKind kind)
+{
+    switch (kind) {
+        case CodecKind::Ymz280Adpcm:
+        case CodecKind::Ymz280Pcm8:
+        case CodecKind::Ymz280Pcm16:
+        case CodecKind::Opl4Pcm8:
+        case CodecKind::Opl4Pcm12:
+        case CodecKind::Opl4Pcm16:
+            return true;
+        default:
+            return false;
+    }
+}
+
 struct WavEntry {
     std::string  path;
     std::string  name;
@@ -61,10 +93,14 @@ struct WavEntry {
     LoopMode     loopMode = LoopMode::None;
     uint32_t     loopFixedStart = 0; // mode == Fixed のときのみ有効
     uint32_t     loopFixedEnd   = 0; // mode == Fixed のときのみ有効
+    bool         hasSampleRateOverride = false; // ymz280/opl4 のみ有効
+    uint32_t     sampleRateOverride    = 0;
 };
 
 struct Params {
     std::string           codec;
+    CodecKind              kind = CodecKind::AdpcmB;
+    std::string           format;      // ymz280/opl4 のときのみ有効な値を保持
     uint32_t              sampleRate = 0;
     uint32_t              boundary   = 0;
     std::string           outputBin;
@@ -103,20 +139,71 @@ static Params loadParams(const std::string& jsonPath)
     if (!root.contains("codec") || !root["codec"].is_string())
         throw std::runtime_error("Missing or invalid 'codec' field (string required)");
     p.codec = toLower(root["codec"].get<std::string>());
-    if (p.codec != "adpcm-b" && p.codec != "adpcm-a")
-        throw std::runtime_error("'codec' must be 'adpcm-b' or 'adpcm-a'");
+    if (p.codec != "adpcm-b" && p.codec != "adpcm-a" &&
+        p.codec != "ymz280"  && p.codec != "opl4")
+        throw std::runtime_error("'codec' must be 'adpcm-b' / 'adpcm-a' / 'ymz280' / 'opl4'");
+
+    // --- format (ymz280 / opl4 のみ必須) ---
+    if (p.codec == "ymz280" || p.codec == "opl4") {
+        if (!root.contains("format") || !root["format"].is_string())
+            throw std::runtime_error(
+                "codec='" + p.codec + "' には 'format' フィールド (string) が必須です");
+        p.format = toLower(root["format"].get<std::string>());
+
+        if (p.codec == "ymz280") {
+            if      (p.format == "adpcm") p.kind = CodecKind::Ymz280Adpcm;
+            else if (p.format == "pcm8")  p.kind = CodecKind::Ymz280Pcm8;
+            else if (p.format == "pcm16") p.kind = CodecKind::Ymz280Pcm16;
+            else throw std::runtime_error(
+                "codec='ymz280' の format は 'adpcm'/'pcm8'/'pcm16' のいずれかです");
+        } else { // opl4
+            if      (p.format == "pcm8")  p.kind = CodecKind::Opl4Pcm8;
+            else if (p.format == "pcm12") p.kind = CodecKind::Opl4Pcm12;
+            else if (p.format == "pcm16") p.kind = CodecKind::Opl4Pcm16;
+            else throw std::runtime_error(
+                "codec='opl4' の format は 'pcm8'/'pcm12'/'pcm16' のいずれかです");
+        }
+    } else if (root.contains("format")) {
+        std::cerr << "[warn] codec='" << p.codec << "' では 'format' は使用されません。指定値は無視されます。\n";
+    }
+    if (p.codec == "adpcm-b") p.kind = CodecKind::AdpcmB;
+    if (p.codec == "adpcm-a") p.kind = CodecKind::AdpcmA;
 
     // --- sample_rate ---
+    // codec/format ごとの許容範囲。ADPCM-A は固定レートのため範囲チェック対象外。
+    auto sampleRateRangeFor = [](CodecKind kind) -> std::pair<uint32_t, uint32_t> {
+        switch (kind) {
+            case CodecKind::Ymz280Adpcm:               return {1, 44100};
+            case CodecKind::Ymz280Pcm8:
+            case CodecKind::Ymz280Pcm16:               return {1, 88200};
+            case CodecKind::Opl4Pcm8:
+            case CodecKind::Opl4Pcm12:
+            case CodecKind::Opl4Pcm16:                 return {1, 192000};
+            default:                                   return {1, 0xFFFFFFFFu};
+        }
+    };
+
     if (p.codec == "adpcm-a") {
         p.sampleRate = 18518;
         if (root.contains("sample_rate"))
             std::cerr << "[warn] ADPCM-A の sample_rate は 18518 Hz 固定です。指定値は無視されます。\n";
-    } else {
+    } else if (p.codec == "adpcm-b") {
         if (!root.contains("sample_rate") || !root["sample_rate"].is_number_integer())
             throw std::runtime_error("Missing or invalid 'sample_rate' field (integer required)");
         uint32_t sr = root["sample_rate"].get<uint32_t>();
         if (sr != 8000 && sr != 16000 && sr != 24000 && sr != 32000)
             throw std::runtime_error("ADPCM-B の sample_rate は 8000/16000/24000/32000 Hz のいずれかです");
+        p.sampleRate = sr;
+    } else {
+        // ymz280 / opl4: 任意の整数値。codec/format ごとの範囲でのみ検証する。
+        if (!root.contains("sample_rate") || !root["sample_rate"].is_number_integer())
+            throw std::runtime_error("Missing or invalid 'sample_rate' field (integer required)");
+        uint32_t sr = root["sample_rate"].get<uint32_t>();
+        auto [lo, hi] = sampleRateRangeFor(p.kind);
+        if (sr < lo || sr > hi)
+            throw std::runtime_error(
+                "'sample_rate' は " + std::to_string(lo) + "〜" + std::to_string(hi)
+                + " Hz の範囲で指定してください (codec='" + p.codec + "', format='" + p.format + "')");
         p.sampleRate = sr;
     }
 
@@ -323,6 +410,34 @@ static Params loadParams(const std::string& jsonPath)
         }
     };
 
+    // sample_rate フィールドのパース (wav_files の各オブジェクト要素向け)
+    // ymz280/opl4 のみ有効。それ以外の codec で指定された場合は警告のうえ無視する
+    // (ADPCM-A の固定レート警告と同じトーン)。
+    auto parseSampleRateField = [&p, &sampleRateRangeFor](const json& item, const std::string& entryPath,
+                                    bool& outHasOverride, uint32_t& outOverride)
+    {
+        outHasOverride = false;
+        outOverride    = 0;
+        if (!item.contains("sample_rate")) return;
+
+        if (!codecSupportsPerEntryRate(p.kind)) {
+            std::cerr << "[warn] '" << entryPath << "' の sample_rate はcodec='" << p.codec
+                      << "' では使用されません。指定値は無視されます。\n";
+            return;
+        }
+        if (!item["sample_rate"].is_number_integer())
+            throw std::runtime_error(
+                "'" + entryPath + "' の sample_rate は整数で指定してください");
+        uint32_t sr = item["sample_rate"].get<uint32_t>();
+        auto [lo, hi] = sampleRateRangeFor(p.kind);
+        if (sr < lo || sr > hi)
+            throw std::runtime_error(
+                "'" + entryPath + "' の sample_rate は " + std::to_string(lo) + "〜"
+                + std::to_string(hi) + " Hz の範囲で指定してください");
+        outHasOverride = true;
+        outOverride    = sr;
+    };
+
     for (auto& item : root["wav_files"]) {
         WavEntry entry;
         if (item.is_string()) {
@@ -343,6 +458,7 @@ static Params loadParams(const std::string& jsonPath)
             parseRootNoteField(item, entry.path, entry.rootNoteMode, entry.rootNoteFixed);
             entry.octave = parseOctaveField(item, entry.path);
             parseLoopField(item, entry.path, entry.loopMode, entry.loopFixedStart, entry.loopFixedEnd);
+            parseSampleRateField(item, entry.path, entry.hasSampleRateOverride, entry.sampleRateOverride);
         } else {
             throw std::runtime_error("wav_files の各要素はパス文字列またはオブジェクトである必要があります");
         }
@@ -560,6 +676,8 @@ int main(int argc, char* argv[])
     }
 
     std::cout << "codec      : " << params.codec      << "\n";
+    if (codecSupportsPerEntryRate(params.kind))
+        std::cout << "format     : " << params.format << "\n";
     std::cout << "sample_rate: " << params.sampleRate << " Hz\n";
     std::cout << "boundary   : " << params.boundary   << " bytes\n";
     std::cout << "output_bin : " << params.outputBin  << "\n";
@@ -568,10 +686,16 @@ int main(int argc, char* argv[])
 
     // --- エンコーダ生成 ---
     std::unique_ptr<AdpcmEncoder> encoder;
-    if (params.codec == "adpcm-b")
-        encoder = std::make_unique<YmDeltaTEncoder>();
-    else
-        encoder = std::make_unique<Ym2610AEncoder>();
+    switch (params.kind) {
+        case CodecKind::AdpcmB:      encoder = std::make_unique<YmDeltaTEncoder>();     break;
+        case CodecKind::AdpcmA:      encoder = std::make_unique<Ym2610AEncoder>();      break;
+        case CodecKind::Ymz280Adpcm: encoder = std::make_unique<Ymz280AdpcmEncoder>();  break;
+        case CodecKind::Ymz280Pcm8:  encoder = std::make_unique<LinearPcm8Encoder>();   break;
+        case CodecKind::Ymz280Pcm16: encoder = std::make_unique<LinearPcm16LEEncoder>();break;
+        case CodecKind::Opl4Pcm8:    encoder = std::make_unique<LinearPcm8Encoder>();   break;
+        case CodecKind::Opl4Pcm12:   encoder = std::make_unique<Opl4Pcm12Encoder>();    break;
+        case CodecKind::Opl4Pcm16:   encoder = std::make_unique<LinearPcm16BEEncoder>();break;
+    }
 
     // --- 各WAVをエンコードしてバイナリに結合 ---
     struct EntryInfo {
@@ -586,6 +710,7 @@ int main(int argc, char* argv[])
         uint32_t    loopStartByte;   // 出力バイナリ内の絶対バイトオフセット
         uint32_t    loopEndByte;     // 同上 (包含)
         std::string loopSource;
+        uint32_t    sampleRate;      // ymz280/opl4 のみ有効。そのエントリで実際に使ったレート
     };
 
     std::vector<EntryInfo> entries;
@@ -620,8 +745,11 @@ int main(int argc, char* argv[])
             }
         }
 
+        // --- このエントリで実際に使うサンプルレート (ymz280/opl4 は per-entry 上書き可) ---
+        uint32_t entryRate = (we.hasSampleRateOverride) ? we.sampleRateOverride : params.sampleRate;
+
         // --- loop 決定 ---
-        LoopDecision loopDec = resolveLoop(we, wavRaw, params.sampleRate);
+        LoopDecision loopDec = resolveLoop(we, wavRaw, entryRate);
 
         // --- ADPCM エンコード ---
         DWORD adpcmSize = 0;
@@ -629,7 +757,7 @@ int main(int argc, char* argv[])
             wavRaw.data(),
             static_cast<DWORD>(wavRaw.size()),
             adpcmSize,
-            params.sampleRate
+            entryRate
         );
 
         if (pAdpcm == nullptr) {
@@ -640,20 +768,22 @@ int main(int argc, char* argv[])
 
         uint32_t paddedSize = alignUp(adpcmSize, params.boundary);
 
-        // --- loop サンプル範囲 → バイトオフセット変換 (2サンプル=1バイト) ---
+        // --- loop サンプル範囲 → バイトオフセット変換 ---
         // resampling() は 64サンプル境界まで無音パディングしてからエンコードするため、
-        // 実データ末尾 (adpcmSize*2 サンプル) を超える範囲は縮めて安全側に倒す。
+        // 実データ末尾 (encoder->bytesToSamples(adpcmSize) サンプル) を超える範囲は
+        // 縮めて安全側に倒す。サンプル数⇔バイト数の比率はフォーマットごとに異なるため
+        // encoder 経由 (samplesToBytes/bytesToSamples) で変換する。
         bool     entryHasLoop = false;
         uint32_t startSample = 0, endSample = 0;
         uint32_t loopStartByte = 0, loopEndByte = 0;
         if (loopDec.hasLoop) {
-            const uint32_t totalResampledSamples = adpcmSize * 2;
+            const uint32_t totalResampledSamples = encoder->bytesToSamples(adpcmSize);
             startSample = std::min(loopDec.startSample, totalResampledSamples > 0 ? totalResampledSamples - 1 : 0);
             endSample   = std::min(loopDec.endSample,   totalResampledSamples > 0 ? totalResampledSamples - 1 : 0);
             if (totalResampledSamples > 0 && endSample > startSample) {
                 entryHasLoop = true;
-                loopStartByte = currentOffset + startSample / 2;
-                loopEndByte   = currentOffset + endSample   / 2;
+                loopStartByte = currentOffset + encoder->samplesToBytes(startSample);
+                loopEndByte   = currentOffset + encoder->samplesToBytes(endSample);
             } else {
                 std::cerr << "[warn] loop 範囲がエンコード結果の範囲外のため無視します ("
                           << we.path << ")\n";
@@ -662,7 +792,8 @@ int main(int argc, char* argv[])
 
         entries.push_back({
             we.name, currentOffset, adpcmSize, paddedSize, rnd.midiNote,
-            entryHasLoop, startSample, endSample, loopStartByte, loopEndByte, loopDec.source
+            entryHasLoop, startSample, endSample, loopStartByte, loopEndByte, loopDec.source,
+            entryRate
         });
 
         binData.insert(binData.end(), pAdpcm, pAdpcm + adpcmSize);
@@ -692,6 +823,8 @@ int main(int argc, char* argv[])
     {
         json out;
         out["codec"]       = params.codec;
+        if (codecSupportsPerEntryRate(params.kind))
+            out["format"] = params.format;
         out["sample_rate"] = params.sampleRate;
         out["boundary"]    = params.boundary;
         out["total_size"]  = static_cast<uint32_t>(binData.size());
@@ -710,6 +843,8 @@ int main(int argc, char* argv[])
             entry["padded_size"] = e.paddedSize;
             entry["end_hex"]     = hexEnd;
             entry["root_note"]   = e.rootNote;
+            if (codecSupportsPerEntryRate(params.kind))
+                entry["sample_rate"] = e.sampleRate;
             if (e.hasLoop) {
                 char hexLoopStart[16], hexLoopEnd[16];
                 std::snprintf(hexLoopStart, sizeof(hexLoopStart), "0x%06X", e.loopStartByte);

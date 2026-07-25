@@ -45,6 +45,11 @@ public:
     // 呼び出し側で delete[] すること
     BYTE* waveToAdpcm(void* pData, DWORD dSize, DWORD& dAdpcmSize, DWORD rate);
 
+    // フォーマットごとのサンプル数⇔バイト数変換 (bytes-per-sample 比率)。
+    // main.cpp 側でのバウンダリ整列・ループ点のバイトオフセット換算にも使う。
+    virtual DWORD samplesToBytes(DWORD sampleCount) const = 0;
+    virtual DWORD bytesToSamples(DWORD byteCount)   const = 0;
+
 protected:
     RIFF_HED*   m_pRiffHed   = nullptr;
     WAVE_CHUNK* m_pWaveChunk = nullptr;
@@ -65,6 +70,9 @@ public:
     YmDeltaTEncoder()  = default;
     ~YmDeltaTEncoder() = default;
 
+    DWORD samplesToBytes(DWORD sampleCount) const override { return sampleCount / 2; }
+    DWORD bytesToSamples(DWORD byteCount)   const override { return byteCount * 2; }
+
 protected:
     int encode(short* pSrc, unsigned char* pDis, DWORD iSampleSize) override;
 
@@ -79,6 +87,9 @@ class Ym2610AEncoder : public AdpcmEncoder {
 public:
     Ym2610AEncoder();
     ~Ym2610AEncoder();
+
+    DWORD samplesToBytes(DWORD sampleCount) const override { return sampleCount / 2; }
+    DWORD bytesToSamples(DWORD byteCount)   const override { return byteCount * 2; }
 
 protected:
     int encode(short* pSrc, unsigned char* pDis, DWORD iSampleSize) override;
@@ -105,4 +116,86 @@ private:
     void  jedi_table_init();
     byte  YM2610_ADPCM_A_Encode(short sample);
     short YM2610_ADPCM_A_Decode(byte code);
+};
+
+// ------------------------------------------------------------
+// ADPCM (YMZ280B)
+// superctr/adpcm の ymz_encode を移植。ヒストリ・ステップサイズ更新式は
+// AICA と共通だが、ニブル順 (上位ニブルが先) が異なる。
+// ------------------------------------------------------------
+class Ymz280AdpcmEncoder : public AdpcmEncoder {
+public:
+    Ymz280AdpcmEncoder()  = default;
+    ~Ymz280AdpcmEncoder() = default;
+
+    DWORD samplesToBytes(DWORD sampleCount) const override { return sampleCount / 2; }
+    DWORD bytesToSamples(DWORD byteCount)   const override { return byteCount * 2; }
+
+protected:
+    int encode(short* pSrc, unsigned char* pDis, DWORD iSampleSize) override;
+
+private:
+    static const int step_table[8];
+};
+
+// ------------------------------------------------------------
+// 8bit リニア PCM (YMZ280B / OPL4 共通)
+// 符号付き8bit。16bit サンプルの上位バイトを丸めて格納する。
+// ------------------------------------------------------------
+class LinearPcm8Encoder : public AdpcmEncoder {
+public:
+    LinearPcm8Encoder()  = default;
+    ~LinearPcm8Encoder() = default;
+
+    DWORD samplesToBytes(DWORD sampleCount) const override { return sampleCount; }
+    DWORD bytesToSamples(DWORD byteCount)   const override { return byteCount; }
+
+protected:
+    int encode(short* pSrc, unsigned char* pDis, DWORD iSampleSize) override;
+};
+
+// ------------------------------------------------------------
+// 16bit リニア PCM・リトルエンディアン (YMZ280B)
+// ------------------------------------------------------------
+class LinearPcm16LEEncoder : public AdpcmEncoder {
+public:
+    LinearPcm16LEEncoder()  = default;
+    ~LinearPcm16LEEncoder() = default;
+
+    DWORD samplesToBytes(DWORD sampleCount) const override { return sampleCount * 2; }
+    DWORD bytesToSamples(DWORD byteCount)   const override { return byteCount / 2; }
+
+protected:
+    int encode(short* pSrc, unsigned char* pDis, DWORD iSampleSize) override;
+};
+
+// ------------------------------------------------------------
+// 16bit リニア PCM・ビッグエンディアン (OPL4 / YMF278B)
+// ------------------------------------------------------------
+class LinearPcm16BEEncoder : public AdpcmEncoder {
+public:
+    LinearPcm16BEEncoder()  = default;
+    ~LinearPcm16BEEncoder() = default;
+
+    DWORD samplesToBytes(DWORD sampleCount) const override { return sampleCount * 2; }
+    DWORD bytesToSamples(DWORD byteCount)   const override { return byteCount / 2; }
+
+protected:
+    int encode(short* pSrc, unsigned char* pDis, DWORD iSampleSize) override;
+};
+
+// ------------------------------------------------------------
+// 12bit リニア PCM (OPL4 / YMF278B)
+// 2サンプルを3バイトに詰める (ニブル交差パッキング)。
+// ------------------------------------------------------------
+class Opl4Pcm12Encoder : public AdpcmEncoder {
+public:
+    Opl4Pcm12Encoder()  = default;
+    ~Opl4Pcm12Encoder() = default;
+
+    DWORD samplesToBytes(DWORD sampleCount) const override { return (sampleCount / 2) * 3; }
+    DWORD bytesToSamples(DWORD byteCount)   const override { return (byteCount / 3) * 2; }
+
+protected:
+    int encode(short* pSrc, unsigned char* pDis, DWORD iSampleSize) override;
 };

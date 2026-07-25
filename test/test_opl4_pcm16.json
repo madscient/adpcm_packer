@@ -1,0 +1,12 @@
+{
+  "codec": "opl4",
+  "format": "pcm16",
+  "sample_rate": 44100,
+  "boundary": 256,
+  "output_bin": "output/test_opl4_pcm16.bin",
+  "output_json": "output/test_opl4_pcm16.json",
+  "wav_files": [
+    { "path": "test/wav/test_a4_440hz.wav", "name": "piano_a4", "root_note": "A4" },
+    { "path": "test/wav/test_e4_329hz.wav", "name": "piano_e4", "root_note": "E4", "sample_rate": 22050 }
+  ]
+}

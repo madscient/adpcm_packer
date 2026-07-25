@@ -1,0 +1,12 @@
+{
+  "codec": "opl4",
+  "format": "pcm8",
+  "sample_rate": 44100,
+  "boundary": 256,
+  "output_bin": "output/test_opl4_pcm8.bin",
+  "output_json": "output/test_opl4_pcm8.json",
+  "wav_files": [
+    { "path": "test/wav/test_a4_440hz.wav", "name": "piano_a4", "root_note": "A4" },
+    { "path": "test/wav/test_c5_523hz.wav", "name": "piano_c5", "root_note": "C5" }
+  ]
+}

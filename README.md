@@ -1,8 +1,9 @@
 # adpcm_packer
 
-複数の WAV ファイルを ADPCM エンコードし、バウンダリ境界で整列させた
-バイナリイメージを生成するツールです。  
-YM2608 (ADPCM-B) および YM2610 (ADPCM-A) に対応しています。
+複数の WAV ファイルを ADPCM / リニアPCM エンコードし、バウンダリ境界で
+整列させたバイナリイメージを生成するツールです。  
+YM2608 (ADPCM-B)、YM2610 (ADPCM-A)、YMZ280B (4bit ADPCM / 8bit・16bit
+リニアPCM)、OPL4 = YMF278B (8bit・12bit・16bit リニアPCM) に対応しています。
 
 ## 必要要件
 
@@ -64,42 +65,68 @@ adpcm_packer <params.json>
 
 ```jsonc
 {
-  "codec":       "adpcm-b",        // "adpcm-b" (YM Delta-T) または "adpcm-a" (YM2610)
-  "sample_rate": 16000,            // ADPCM-B: 8000 / 16000 / 24000 / 32000 Hz
+  "codec":       "adpcm-b",        // "adpcm-b" / "adpcm-a" / "ymz280" / "opl4"
+  "format":      "pcm8",           // "ymz280"/"opl4" のときのみ必須 (下記 format 節を参照)
+  "sample_rate": 16000,            // ADPCM-B: 8000/16000/24000/32000 Hz
                                    // ADPCM-A: 指定不要（18518 Hz 固定）
+                                   // ymz280/opl4: format 節の範囲内で任意の整数Hz
   "boundary":    256,              // バウンダリ境界: 32 または 256 バイト
   "output_bin":  "output.bin",     // 出力バイナリファイルパス
   "output_json": "output.json",    // 出力オフセット一覧 JSON パス
   "wav_files": [
     {
-      "path":      "piano_a4.wav",
-      "name":      "piano",        // 出力 JSON 内ラベル（省略時はファイル名から自動生成）
-      "root_note": "A4",           // ルートノート（省略時は "none" 扱い → 69）
-      "octave":    4,              // オクターブ制約（省略時は制約なし）
-      "loop":      "auto"          // ループポイント（省略時は解析しない）
+      "path":        "piano_a4.wav",
+      "name":        "piano",        // 出力 JSON 内ラベル（省略時はファイル名から自動生成）
+      "root_note":   "A4",           // ルートノート（省略時は "none" 扱い → 69）
+      "octave":      4,              // オクターブ制約（省略時は制約なし）
+      "loop":        "auto",         // ループポイント（省略時は解析しない）
+      "sample_rate": 22050           // ymz280/opl4 のみ有効。このファイルだけ個別のレートで
+                                     // エンコードしたい場合に指定（省略時はトップレベルの値）
     },
     "se3.wav"                      // 文字列のみの簡略記法も可
   ]
 }
 ```
 
-### codec
+### codec / format
 
-| 値 | エンコーダ | 対応チップ |
-|---|---|---|
-| `adpcm-b` | YmDeltaTEncoder | YM2608, YM2610 ADPCM-B |
-| `adpcm-a` | Ym2610AEncoder  | YM2610 ADPCM-A |
+| `codec` | エンコーダ | 対応チップ | `format` |
+|---|---|---|---|
+| `adpcm-b` | YmDeltaTEncoder      | YM2608, YM2610 ADPCM-B | (不要) |
+| `adpcm-a` | Ym2610AEncoder       | YM2610 ADPCM-A         | (不要) |
+| `ymz280`  | Ymz280AdpcmEncoder / LinearPcm8Encoder / LinearPcm16LEEncoder | YMZ280B | `"adpcm"` / `"pcm8"` / `"pcm16"` (必須) |
+| `opl4`    | LinearPcm8Encoder / Opl4Pcm12Encoder / LinearPcm16BEEncoder   | OPL4 (YMF278B)          | `"pcm8"` / `"pcm12"` / `"pcm16"` (必須) |
 
-### sample_rate (ADPCM-B のみ)
+`ymz280`/`opl4` は `format` フィールド (string) で出力データフォーマットを
+選択します（省略・不正値はエラー）。それ以外の codec で `format` を
+指定した場合は警告のうえ無視されます。
 
-| 値 | 備考 |
+- YMZ280B の 4bit ADPCM は 8bit/16bit PCM とは異なる独自の差分符号化
+  （ニブル交差パッキング、上位ニブルが先）です。ADPCM-A/B とは互換性が
+  ありません。
+- OPL4 (YMF278B) はADPCMをサポートしません（8bit/12bit/16bitのリニア
+  PCMのみ）。12bit形式は2サンプルを3バイトへパックします。
+- 16bit PCMのエンディアンはチップにより異なります: YMZ280Bは
+  **リトルエンディアン**、OPL4は**ビッグエンディアン**（データシート記載の
+  実装に合わせています）。
+
+### sample_rate
+
+| codec | 指定方法 |
 |---|---|
-| `8000`  | 8 kHz |
-| `16000` | 16 kHz |
-| `24000` | 24 kHz |
-| `32000` | 32 kHz |
+| `adpcm-b` | `8000` / `16000` / `24000` / `32000` のいずれか |
+| `adpcm-a` | 指定不要（18518 Hz 固定。指定しても警告のうえ無視） |
+| `ymz280` + `format:"adpcm"`  | 1〜44100 Hz の任意の整数 |
+| `ymz280` + `format:"pcm8"/"pcm16"` | 1〜88200 Hz の任意の整数 |
+| `opl4`（全 format） | 1〜192000 Hz の任意の整数 |
 
 入力 WAV のサンプリング周波数は自動検出してリサンプリングします。
+
+**per-entry 上書き（`ymz280`/`opl4` のみ）:** YMZ280B・OPL4 は実チップ側で
+チャンネルごとに独立した再生レートを持てるため、`wav_files` の各エントリで
+`sample_rate` を個別に指定してトップレベルの値を上書きできます
+（`adpcm-a`/`adpcm-b` では上書き不可。指定しても警告のうえ無視されます）。
+出力 JSON の各エントリには実際に使われた `sample_rate` が常に出力されます。
 
 ### boundary
 
@@ -108,7 +135,7 @@ adpcm_packer <params.json>
 | 値 | 用途例 |
 |---|---|
 | `32`  | ADPCM-A (YM2610 は 32 byte 境界) |
-| `256` | ADPCM-B (YM2608/YM2610 は 256 byte 境界) |
+| `256` | ADPCM-B (YM2608/YM2610 は 256 byte 境界)、YMZ280B、OPL4 |
 
 ### root_note
 
@@ -187,6 +214,12 @@ FITOM_X 側がこの値を基準に再生速度（DeltaN 等）を算出しま�
 瞬間）にデコーダの内部状態（予測値・ステップサイズ）が不連続になり、微小なクリック音が
 生じる場合があります。これはコーデックの性質上の制約であり、本ツールでは補正しません。
 
+**OPL4 12bit PCM (`opl4` + `format:"pcm12"`) の制約:** 12bit形式は2サンプルを
+3バイトに詰めるため、偶数番目のサンプルしかバイト境界の先頭になれません
+（データシートが定める12bit開始アドレスの制約と同じ）。`loop_start_hex` /
+`loop_end_hex` は奇数サンプルが指定された場合、直前の偶数サンプル境界へ
+切り捨てられます。
+
 ```jsonc
 // 例: smpl チャンクがあればそれを使用、無ければ自動検出
 { "path": "organ_c4.wav", "root_note": "C4", "loop": "auto" }
@@ -231,20 +264,87 @@ FITOM_X 側がこの値を基準に再生速度（DeltaN 等）を算出しま�
 }
 ```
 
+`codec` が `ymz280`/`opl4` の場合はトップレベルに `format` が、各エントリに
+実際に使われた `sample_rate` が追加で出力されます:
+
+```jsonc
+{
+  "codec": "ymz280",
+  "format": "pcm8",
+  "sample_rate": 22050,
+  "boundary": 256,
+  "total_size": 39168,
+  "entries": [
+    {
+      "name": "override_44100",
+      "offset": 11264,
+      "offset_hex": "0x002C00",
+      "size": 22080,
+      "padded_size": 22272,
+      "end_hex": "0x0082FF",
+      "root_note": 69,
+      "sample_rate": 44100  // このエントリだけ wav_files 側で上書きした値
+    }
+  ]
+}
+```
+
 | フィールド | 説明 |
 |---|---|
 | `offset` / `offset_hex` | バイナリ内の先頭オフセット |
-| `size` | ADPCM データのバイト数（パディング前） |
+| `size` | エンコード後データのバイト数（パディング前） |
 | `padded_size` | バウンダリ整列後のバイト数 |
 | `end_hex` | パディング込み末尾アドレス |
 | `root_note` | MIDI ノート番号（常に出力。省略なし） |
+| `sample_rate`（エントリ側。`ymz280`/`opl4` のみ） | そのエントリで実際にエンコードに使ったサンプルレート |
 | `loop_start_sample` / `loop_end_sample` | ループ範囲（リサンプリング後サンプル単位、包含。`loop` 指定時のみ出力） |
 | `loop_start_hex` / `loop_end_hex` | ループ範囲のバイナリ内絶対バイトアドレス（同上） |
 | `loop_source` | ループ範囲の取得元: `"smpl_chunk"` / `"auto_detected"` / `"fixed"`（同上） |
 
-`offset_hex` / `end_hex` は YM チップのスタート/エンドアドレスレジスタに
+`offset_hex` / `end_hex` はチップのスタート/エンドアドレスレジスタに
 そのまま使用できます。`loop_start_hex` / `loop_end_hex` も同様にループ制御用の
-アドレスレジスタにそのまま使用できます。
+アドレスレジスタにそのまま使用できます（バイトあたりのサンプル数はコーデック
+ごとに異なり、この変換は本ツール側で正しく行われます）。
+
+## JSON Schema
+
+`schema/` 配下に入力・出力それぞれの JSON Schema (Draft 7) を用意しています。
+
+| ファイル | 対象 |
+|---|---|
+| `schema/params.schema.json` | 入力パラメータJSON（`adpcm_packer <params.json>` に渡すファイル） |
+| `schema/output.schema.json` | 出力オフセット一覧JSON（`output_json` に生成されるファイル） |
+
+エディタの補完・入力ミスの早期検出、CI等での自動検証に利用できます。VSCode
+では params.json 側に以下を追加すると入力中に検証・補完が効きます:
+
+```jsonc
+{
+  "$schema": "./schema/params.schema.json",
+  "codec": "ymz280",
+  ...
+}
+```
+
+Python の [`jsonschema`](https://pypi.org/project/jsonschema/) 等、Draft 7 に
+対応したバリデータであれば言語を問わず利用できます:
+
+```bash
+python -c "
+import json, jsonschema
+schema = json.load(open('schema/params.schema.json', encoding='utf-8'))
+doc    = json.load(open('test/test_ymz280_pcm8.json', encoding='utf-8'))
+jsonschema.validate(doc, schema)
+print('OK')
+"
+```
+
+`codec` が `ymz280`/`opl4` のときの `format` 必須化や、codec/format ごとの
+`sample_rate` 許容範囲・`boundary` の列挙値など、README本文で説明している
+バリデーションルールの主要な部分をスキーマ側にも反映しています（`loop`の
+`start_sample < end_sample` など一部の相互制約はスキーマでは表現せず、
+実行時のエラーメッセージに委ねています）。パラメータを追加・変更した際は
+`CLAUDE.md` の「変更時の注意」に従って両スキーマも更新してください。
 
 ## プロジェクト構成
 
@@ -254,11 +354,20 @@ adpcm_packer/
 ├── .gitmodules
 ├── .gitignore
 ├── README.md
+├── CLAUDE.md                   # Claude Code 向け作業規約
+├── LICENSE
+│
+├── docs/                       # README 以外の補足ドキュメント
+│   └── handoff.md              # 開発経緯・引継ぎ事項
+│
+├── schema/                     # 入力/出力 JSON の JSON Schema (Draft 7)
+│   ├── params.schema.json
+│   └── output.schema.json
 │
 ├── src/                        # ソースコード
 │   ├── main.cpp                # エントリポイント・パラメータ処理・パッキング
-│   ├── codec.h                 # ADPCM エンコーダ宣言
-│   ├── codec.cpp               # ADPCM エンコーダ実装 (ADPCM-B / ADPCM-A)
+│   ├── codec.h                 # エンコーダ宣言
+│   ├── codec.cpp               # エンコーダ実装 (ADPCM-B / ADPCM-A / YMZ280B / OPL4)
 │   ├── wav_reader.h            # WAV → 16bit モノラル PCM 取り出しユーティリティ・smplチャンク読取
 │   ├── pitch_estimator.h       # YIN アルゴリズムによる基本周波数推定
 │   └── loop_detector.h         # YIN周期ベースのループポイント自動検出
@@ -267,11 +376,20 @@ adpcm_packer/
 │   └── nlohmann_json/          # JSON ライブラリ (git submodule)
 │
 └── test/                       # テスト用ファイル
-    ├── test_adpcm_b.json
-    ├── test_adpcm_a.json
-    ├── test_pitch.json
-    ├── test_notename.json
-    ├── test_rootnote.json
+    ├── test_basic_adpcm_a.json
+    ├── test_basic_adpcm_b.json
+    ├── test_boundary_32.json
+    ├── test_loop.json
+    ├── test_octave.json
+    ├── test_rootnote_auto.json
+    ├── test_rootnote_fixed.json
+    ├── test_rootnote_notename.json
+    ├── test_samplerate_8k.json / _24k.json / _32k.json
+    ├── test_shorthand.json
+    ├── test_ymz280_adpcm.json
+    ├── test_ymz280_pcm8.json / _pcm16.json
+    ├── test_ymz280_persample_rate.json
+    ├── test_opl4_pcm8.json / _pcm12.json / _pcm16.json
     └── wav/
         └── *.wav
 ```

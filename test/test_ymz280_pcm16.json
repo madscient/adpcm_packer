@@ -1,0 +1,16 @@
+{
+  "codec": "ymz280",
+  "format": "pcm16",
+  "sample_rate": 44100,
+  "boundary": 256,
+  "output_bin": "output/test_ymz280_pcm16.bin",
+  "output_json": "output/test_ymz280_pcm16.json",
+  "wav_files": [
+    { "path": "test/wav/test_440hz_44100_mono.wav",   "name": "se_440hz_mono_44100" },
+    {
+      "path": "test/wav/test_loop_auto.wav",
+      "name": "loop_auto_detected",
+      "loop": "auto"
+    }
+  ]
+}

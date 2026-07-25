@@ -1,0 +1,13 @@
+{
+  "codec": "ymz280",
+  "format": "pcm8",
+  "sample_rate": 22050,
+  "boundary": 256,
+  "output_bin": "output/test_ymz280_persample_rate.bin",
+  "output_json": "output/test_ymz280_persample_rate.json",
+  "wav_files": [
+    { "path": "test/wav/test_440hz_44100_mono.wav", "name": "default_rate" },
+    { "path": "test/wav/test_440hz_44100_mono.wav", "name": "override_44100", "sample_rate": 44100 },
+    { "path": "test/wav/test_440hz_44100_mono.wav", "name": "override_11025", "sample_rate": 11025 }
+  ]
+}

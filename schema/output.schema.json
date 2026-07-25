@@ -1,0 +1,92 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "output.schema.json",
+  "title": "adpcm_packer output JSON",
+  "description": "adpcm_packer が output_json に生成するオフセット一覧JSONのスキーマ。詳細な意味論はREADME.mdを正とする。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["codec", "sample_rate", "boundary", "total_size", "entries"],
+  "properties": {
+    "codec": {
+      "type": "string",
+      "enum": ["adpcm-b", "adpcm-a", "ymz280", "opl4"]
+    },
+    "format": {
+      "type": "string",
+      "enum": ["adpcm", "pcm8", "pcm12", "pcm16"],
+      "description": "codec が 'ymz280'/'opl4' のときのみ出力される (入力paramsのformatをそのままエコー)。"
+    },
+    "sample_rate": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "トップレベルのデフォルトサンプルレート。ymz280/opl4 ではエントリ側で上書きされている場合がある (entries[].sample_rate参照)。"
+    },
+    "boundary": {
+      "type": "integer",
+      "enum": [32, 256]
+    },
+    "total_size": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "出力バイナリの総バイト数。"
+    },
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "$defs": {
+    "hexAddress": {
+      "type": "string",
+      "pattern": "^0x[0-9A-F]{6}$",
+      "description": "6桁の16進バイトアドレス (例: \"0x0008A4\")。チップのアドレスレジスタへそのまま使用できる。"
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "offset", "offset_hex", "size", "padded_size", "end_hex", "root_note"],
+      "properties": {
+        "name": { "type": "string" },
+        "offset": { "type": "integer", "minimum": 0, "description": "バイナリ内の先頭オフセット。" },
+        "offset_hex": { "$ref": "#/$defs/hexAddress" },
+        "size": { "type": "integer", "minimum": 0, "description": "エンコード後データのバイト数 (パディング前)。" },
+        "padded_size": { "type": "integer", "minimum": 0, "description": "バウンダリ整列後のバイト数。" },
+        "end_hex": { "$ref": "#/$defs/hexAddress" },
+        "root_note": { "type": "integer", "minimum": 0, "maximum": 127, "description": "MIDIノート番号。常に出力される。" },
+        "sample_rate": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "codec が 'ymz280'/'opl4' のときのみ出力。このエントリで実際に使ったサンプルレート。"
+        },
+        "loop_start_sample": { "type": "integer", "minimum": 0 },
+        "loop_end_sample": { "type": "integer", "minimum": 0 },
+        "loop_start_hex": { "$ref": "#/$defs/hexAddress" },
+        "loop_end_hex": { "$ref": "#/$defs/hexAddress" },
+        "loop_source": {
+          "type": "string",
+          "enum": ["smpl_chunk", "auto_detected", "fixed"]
+        }
+      },
+      "dependencies": {
+        "loop_start_sample": ["loop_end_sample", "loop_start_hex", "loop_end_hex", "loop_source"],
+        "loop_end_sample": ["loop_start_sample", "loop_start_hex", "loop_end_hex", "loop_source"],
+        "loop_start_hex": ["loop_start_sample", "loop_end_sample", "loop_end_hex", "loop_source"],
+        "loop_end_hex": ["loop_start_sample", "loop_end_sample", "loop_start_hex", "loop_source"],
+        "loop_source": ["loop_start_sample", "loop_end_sample", "loop_start_hex", "loop_end_hex"]
+      }
+    }
+  },
+  "if": {
+    "properties": { "codec": { "enum": ["ymz280", "opl4"] } },
+    "required": ["codec"]
+  },
+  "then": {
+    "required": ["format"],
+    "properties": {
+      "entries": {
+        "type": "array",
+        "items": { "required": ["sample_rate"] }
+      }
+    }
+  }
+}

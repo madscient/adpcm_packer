@@ -1,0 +1,21 @@
+{
+  "codec": "opl4",
+  "format": "pcm12",
+  "sample_rate": 44100,
+  "boundary": 256,
+  "output_bin": "output/test_opl4_pcm12.bin",
+  "output_json": "output/test_opl4_pcm12.json",
+  "wav_files": [
+    { "path": "test/wav/test_a4_440hz.wav", "name": "piano_a4", "root_note": "A4" },
+    {
+      "path": "test/wav/test_loop_smpl.wav",
+      "name": "loop_from_smpl_chunk",
+      "loop": "auto"
+    },
+    {
+      "path": "test/wav/test_loop_auto.wav",
+      "name": "loop_auto_detected",
+      "loop": "auto"
+    }
+  ]
+}

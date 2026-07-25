@@ -80,7 +80,7 @@
   全組み合わせ（整数/ノート名/auto/none、octave の有無、sample_rate の
   4パターン、boundary の2パターン等）を網羅している。
 
-## 現在の状態（このドキュメント作成時点）
+## 現在の状態（claude.ai セッション終了時点。以降の更新は次節以降を参照）
 
 - 全11テストJSONが実行成功することを確認済み（`完了。` が出力され、
   `[error]` なし）。
@@ -91,6 +91,64 @@
   リセットされ、コミット履歴は失われている**。現在お渡しできるのは
   ファイル一式のみで、コミット履歴は再現できていない。Claude Code側で
   改めて `git init` してコミット履歴を作り直す必要がある。
+
+## Claude Code側での追加セッション
+
+### ルートノート自動検出・ループポイント機能の追加
+
+`pitch_estimator.h`/`loop_detector.h` を追加し、`root_note: "auto"` の
+実装（本ドキュメント作成時点では未実装だった）と、`loop` フィールド
+（`smpl` チャンク優先 → YIN周期ベース自動検出フォールバック）を実装した。
+`wav_reader.h` を新設し、`codec.cpp` 側のWAVパースとは意図的に分離した
+（`codec.cpp` はエンコード用リサンプリング込み、`wav_reader.h` はピッチ
+推定・ループ検出専用の単純なPCM取り出しのみ）。詳細は `CLAUDE.md` の
+アーキテクチャ節を参照。
+
+### YMZ280B / OPL4-AWM (YMF278B) 対応の追加
+
+既存の YM2608/YM2610 (ADPCM-A/B) に加え、YMZ280B（4bit ADPCM / 8bit・
+16bit リニアPCM 選択式）と OPL4-AWM = YMF278B（8bit / 12bit / 16bit
+リニアPCM、ADPCM非対応）への出力サポートを追加した。
+
+- **一次情報の裏取り**: 自前の実装可能性を過信せず、`superctr/adpcm`
+  リポジトリの `ymz_codec.c`（YMZ280Bのエンコードアルゴリズム）と、
+  MAMEが現在採用している `aaronsgiles/ymfm` の `ymfm_pcm.cpp`
+  （OPL4のPCMフォーマットのデコード側実装）、および両チップのデータ
+  シート（`ymf278Bapplicationmanual.pdf` の EXTERNAL MEMORY DATA
+  FORMAT節）を直接参照し、ニブル順・エンディアン・パック形式を
+  相互検証してから実装した。特に **YMZ280Bの16bit PCMはリトル
+  エンディアン、OPL4は逆のビッグエンディアン**という違いがあり、
+  見落としやすいので注意。
+- **設計判断（ユーザー確認済み）**: フォーマット選択は数値(1/2/3)では
+  なく `"format": "adpcm"|"pcm8"|"pcm16"` 等の説明的な文字列にした。
+  また、YMZ280B/OPL4は実チップ側でチャンネルごとに独立した再生レートを
+  持てるため、`wav_files` の各エントリで `sample_rate` の個別上書きを
+  許可した（ADPCM-A/B は既存どおりグローバル1本のまま変更していない）。
+- **アーキテクチャ変更**: `AdpcmEncoder` 基底クラスに
+  `samplesToBytes`/`bytesToSamples` の public 仮想関数を追加し、
+  フォーマットごとに異なる bytes-per-sample 比率（ADPCM/YMZ280Bは
+  2サンプル/1バイト、PCM8は1サンプル/1バイト、PCM16は1サンプル/2バイト、
+  OPL4 PCM12は2サンプル/3バイト）を吸収できるようにした。以前は
+  `waveToAdpcm()` が `dPcmSize/2` を決め打ちしており、これがYMZ280B/OPL4
+  対応のボトルネックだった。`main.cpp` 側のループ点⇔バイトオフセット
+  変換もこの仮想関数経由に一般化済み。
+- **意図的なスコープ外**: このツールはチップのレジスタ値（YMZ280Bの
+  FN/OCTAVE、OPL4のF-NUMBER/OCTAVE/wave table headerの12バイト構造等）
+  を計算・出力しない方針を踏襲した。既存のADPCM-A/Bが `offset_hex`/
+  `end_hex`/`root_note` を出すだけでレジスタ計算をダウンストリームの
+  ドライバに委ねているのと同じ設計思想。YMZ280Bのsample_rateも、実際の
+  FN量子化（クロック依存）はモデル化せず、任意のHzを指定してその通りに
+  リサンプリングするだけに留めている（ドライバ側でFN値を逆算する前提）。
+- 動作確認: 新規7テストJSON + 既存13テストJSON、計20本すべてで
+  `完了。` を確認済み（MSVC `/W4 /WX` でも警告ゼロ）。
+
+### ドキュメント整理
+
+`handoff.md` をリポジトリルートから `docs/handoff.md` へ移動した
+（`CLAUDE.md` は元々 `docs/handoff.md` を参照する記述になっていたが、
+実体がルート直下にあり不整合だった）。`README.md` はエンドユーザー向け
+仕様書としてルートに残し、`CLAUDE.md` はClaude Codeの規約により
+リポジトリルート固定とした。
 
 ## 未対応・今後の検討事項
 

@@ -1,0 +1,173 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "params.schema.json",
+  "title": "adpcm_packer params.json",
+  "description": "adpcm_packer の入力パラメータJSON (params.json) のスキーマ。詳細な意味論はREADME.mdを正とする。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["codec", "boundary", "output_bin", "output_json", "wav_files"],
+  "properties": {
+    "codec": {
+      "type": "string",
+      "enum": ["adpcm-b", "adpcm-a", "ymz280", "opl4"],
+      "description": "adpcm-b: YM2608/YM2610 ADPCM-B / adpcm-a: YM2610 ADPCM-A / ymz280: YMZ280B / opl4: OPL4 (YMF278B)"
+    },
+    "format": {
+      "type": "string",
+      "enum": ["adpcm", "pcm8", "pcm12", "pcm16"],
+      "description": "codec が 'ymz280'/'opl4' のときのみ必須。許容値は codec ごとに異なる (下記 allOf 参照)。"
+    },
+    "sample_rate": {
+      "type": "integer",
+      "description": "adpcm-b: 8000/16000/24000/32000。adpcm-a: 指定不要(18518Hz固定、指定しても無視)。ymz280/opl4: codec/formatごとの範囲内の任意の整数Hz。"
+    },
+    "boundary": {
+      "type": "integer",
+      "enum": [32, 256],
+      "description": "各エントリのパディング境界(バイト)。"
+    },
+    "output_bin": {
+      "type": "string",
+      "minLength": 1,
+      "description": "出力バイナリファイルのパス。"
+    },
+    "output_json": {
+      "type": "string",
+      "minLength": 1,
+      "description": "出力オフセット一覧JSONのパス (output.schema.json 参照)。"
+    },
+    "wav_files": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/wavFileEntry" }
+    }
+  },
+  "$defs": {
+    "rootNote": {
+      "description": "MIDIノート番号(0-127)、ノート名文字列(C-1〜G9)、\"auto\"、\"none\"のいずれか。省略時は\"none\"扱い(→69)。",
+      "anyOf": [
+        { "type": "integer", "minimum": 0, "maximum": 127 },
+        { "type": "string", "pattern": "^([aA][uU][tT][oO]|[nN][oO][nN][eE])$" },
+        { "type": "string", "pattern": "^[A-Ga-g](#|[bB]|♯|♭)?(-1|[0-9])$" }
+      ]
+    },
+    "octave": {
+      "description": "オクターブ制約 (-1〜9) または \"none\"。省略時は制約なし。",
+      "anyOf": [
+        { "type": "integer", "minimum": -1, "maximum": 9 },
+        { "type": "string", "pattern": "^[nN][oO][nN][eE]$" }
+      ]
+    },
+    "loop": {
+      "description": "\"auto\" (smplチャンク優先→YIN自動検出) / \"none\" (解析しない、デフォルト) / {start_sample,end_sample} (明示指定、リサンプリング後サンプル単位)。",
+      "anyOf": [
+        { "type": "string", "pattern": "^([aA][uU][tT][oO]|[nN][oO][nN][eE])$" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["start_sample", "end_sample"],
+          "properties": {
+            "start_sample": { "type": "integer", "minimum": 0 },
+            "end_sample": { "type": "integer", "minimum": 0 }
+          }
+        }
+      ]
+    },
+    "wavFileEntry": {
+      "anyOf": [
+        { "type": "string", "minLength": 1, "description": "簡略記法。WAVパスのみ (root_note=none, octave=制約なし扱い)。" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1, "description": "WAVファイルのパス。" },
+            "name": { "type": "string", "description": "出力JSON内のラベル。省略時はファイル名から自動生成。" },
+            "root_note": { "$ref": "#/$defs/rootNote" },
+            "octave": { "$ref": "#/$defs/octave" },
+            "loop": { "$ref": "#/$defs/loop" },
+            "sample_rate": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "codec が 'ymz280'/'opl4' のときのみ有効なper-entry上書き。それ以外のcodecでは警告のうえ無視される。"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "codec": { "const": "ymz280" } },
+        "required": ["codec"]
+      },
+      "then": {
+        "required": ["format"],
+        "properties": {
+          "format": { "enum": ["adpcm", "pcm8", "pcm16"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "codec": { "const": "opl4" } },
+        "required": ["codec"]
+      },
+      "then": {
+        "required": ["format"],
+        "properties": {
+          "format": { "enum": ["pcm8", "pcm12", "pcm16"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "codec": { "const": "adpcm-b" } },
+        "required": ["codec"]
+      },
+      "then": {
+        "required": ["sample_rate"],
+        "properties": {
+          "sample_rate": { "enum": [8000, 16000, 24000, 32000] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "codec": { "const": "ymz280" }, "format": { "const": "adpcm" } },
+        "required": ["codec", "format"]
+      },
+      "then": {
+        "required": ["sample_rate"],
+        "properties": {
+          "sample_rate": { "minimum": 1, "maximum": 44100 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "codec": { "const": "ymz280" }, "format": { "enum": ["pcm8", "pcm16"] } },
+        "required": ["codec", "format"]
+      },
+      "then": {
+        "required": ["sample_rate"],
+        "properties": {
+          "sample_rate": { "minimum": 1, "maximum": 88200 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "codec": { "const": "opl4" } },
+        "required": ["codec"]
+      },
+      "then": {
+        "required": ["sample_rate"],
+        "properties": {
+          "sample_rate": { "minimum": 1, "maximum": 192000 }
+        }
+      }
+    }
+  ]
+}

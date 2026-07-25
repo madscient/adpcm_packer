@@ -58,9 +58,9 @@ BYTE* AdpcmEncoder::waveToAdpcm(void* pData, DWORD /*dSize*/, DWORD& dAdpcmSize,
     }
 
     // --- ADPCM エンコード ---
-    BYTE* pAdpcm = new BYTE[dPcmSize / 2]();
+    dAdpcmSize = samplesToBytes(dPcmSize);
+    BYTE* pAdpcm = new BYTE[dAdpcmSize]();
     encode(pPcm, pAdpcm, dPcmSize);
-    dAdpcmSize = dPcmSize / 2;
     delete[] pPcm;
     return pAdpcm;
 }
@@ -294,5 +294,118 @@ int Ym2610AEncoder::encode(short* pSrc, unsigned char* pDis, DWORD iSampleSize)
 
     delete[] inBuffer;
     inBuffer = nullptr;
+    return 0;
+}
+
+// ============================================================
+// Ymz280AdpcmEncoder  (YMZ280B 4bit ADPCM)
+// superctr/adpcm の ymz_encode / ymz_step を移植したもの。
+// ============================================================
+
+const int Ymz280AdpcmEncoder::step_table[8] = {
+    230, 230, 230, 230, 307, 409, 512, 614
+};
+
+int Ymz280AdpcmEncoder::encode(short* pSrc, unsigned char* pDis, DWORD iSampleSize)
+{
+    long stepSize = 127;
+    long history   = 0;
+    unsigned char adpcmPack = 0;
+
+    for (DWORD iCnt = 0; iCnt < iSampleSize; ++iCnt) {
+        // 精度を落としてノイズを低減する (superctr/adpcm 実装のコメントより)
+        long diffIn = (static_cast<long>(*pSrc++) & ~7L) - history;
+        long adpcmU = (std::abs(diffIn) << 16) / (stepSize << 14);
+        if (adpcmU > 7) adpcmU = 7;
+        unsigned char adpcm = static_cast<unsigned char>(adpcmU);
+        if (diffIn < 0) adpcm |= 0x8;
+
+        // --- 実チップのデコーダと同じ更新式で history / stepSize を進める ---
+        long delta = adpcm & 0x7;
+        long diff  = ((1 + (delta << 1)) * stepSize) >> 3;
+        if (diff < 0)     diff = 0;
+        if (diff > 32767) diff = 32767;
+        long newHistory = ((adpcm & 0x8) != 0) ? (history - diff) : (history + diff);
+        if (newHistory < -32768) newHistory = -32768;
+        if (newHistory > 32767)  newHistory = 32767;
+        history = newHistory;
+
+        long newStep = (step_table[delta] * stepSize) >> 8;
+        if (newStep < 127)   newStep = 127;
+        if (newStep > 24576) newStep = 24576;
+        stepSize = newStep;
+
+        if ((iCnt & 0x01) == 0) {
+            adpcmPack = static_cast<unsigned char>(adpcm << 4);
+        } else {
+            adpcmPack |= adpcm;
+            *pDis++ = adpcmPack;
+        }
+    }
+    return 0;
+}
+
+// ============================================================
+// LinearPcm8Encoder  (YMZ280B / OPL4 共通・符号付き8bit)
+// ============================================================
+
+int LinearPcm8Encoder::encode(short* pSrc, unsigned char* pDis, DWORD iSampleSize)
+{
+    for (DWORD i = 0; i < iSampleSize; ++i) {
+        long v = static_cast<long>(pSrc[i]) + 128; // 丸め
+        if (v > 32767) v = 32767;
+        pDis[i] = static_cast<unsigned char>(v >> 8);
+    }
+    return 0;
+}
+
+// ============================================================
+// LinearPcm16LEEncoder  (YMZ280B・16bit リトルエンディアン)
+// ============================================================
+
+int LinearPcm16LEEncoder::encode(short* pSrc, unsigned char* pDis, DWORD iSampleSize)
+{
+    for (DWORD i = 0; i < iSampleSize; ++i) {
+        unsigned short v = static_cast<unsigned short>(pSrc[i]);
+        pDis[i * 2 + 0] = static_cast<unsigned char>(v & 0xFF);
+        pDis[i * 2 + 1] = static_cast<unsigned char>((v >> 8) & 0xFF);
+    }
+    return 0;
+}
+
+// ============================================================
+// LinearPcm16BEEncoder  (OPL4/YMF278B・16bit ビッグエンディアン)
+// ============================================================
+
+int LinearPcm16BEEncoder::encode(short* pSrc, unsigned char* pDis, DWORD iSampleSize)
+{
+    for (DWORD i = 0; i < iSampleSize; ++i) {
+        unsigned short v = static_cast<unsigned short>(pSrc[i]);
+        pDis[i * 2 + 0] = static_cast<unsigned char>((v >> 8) & 0xFF);
+        pDis[i * 2 + 1] = static_cast<unsigned char>(v & 0xFF);
+    }
+    return 0;
+}
+
+// ============================================================
+// Opl4Pcm12Encoder  (OPL4/YMF278B・12bit パック PCM)
+// 2サンプル(v0,v1)を3バイトに詰める:
+//   byte0 = v0 の上位8bit
+//   byte1 = (v1 の下位4bit << 4) | (v0 の下位4bit)
+//   byte2 = v1 の上位8bit
+// (ymfm の fetch_sample 12bit分岐のデコード式から逆算した詰め方)
+// ============================================================
+
+int Opl4Pcm12Encoder::encode(short* pSrc, unsigned char* pDis, DWORD iSampleSize)
+{
+    for (DWORD i = 0; i + 1 < iSampleSize; i += 2) {
+        long v0 = static_cast<long>(pSrc[i])     >> 4; // 12bit符号付き (-2048~2047)
+        long v1 = static_cast<long>(pSrc[i + 1]) >> 4;
+
+        DWORD outBase = (i / 2) * 3;
+        pDis[outBase + 0] = static_cast<unsigned char>((v0 >> 4) & 0xFF);
+        pDis[outBase + 1] = static_cast<unsigned char>(((v1 & 0xF) << 4) | (v0 & 0xF));
+        pDis[outBase + 2] = static_cast<unsigned char>((v1 >> 4) & 0xFF);
+    }
     return 0;
 }
