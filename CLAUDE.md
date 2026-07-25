@@ -69,10 +69,13 @@ src/
 ├── main.cpp             パラメータJSON読み込み・パッキング処理・出力JSON生成
 ├── codec.h / codec.cpp   ADPCMエンコーダ本体（YmDeltaTEncoder = ADPCM-B,
 │                         Ym2610AEncoder = ADPCM-A）。実機互換性最優先。
-├── wav_reader.h          WAV→16bitモノラルPCM取り出し（ピッチ推定専用。
-│                         codec.cpp 内の WAV パースとは独立している）
-└── pitch_estimator.h     YINアルゴリズムによるF0推定 + MIDIノート変換 +
-                          オクターブ正規化
+├── wav_reader.h          WAV→16bitモノラルPCM取り出し（ピッチ推定・ループ検出専用。
+│                         codec.cpp 内の WAV パースとは独立している）。
+│                         smpl チャンク読み取り (readSmplLoop) もここ。
+├── pitch_estimator.h     YINアルゴリズムによるF0推定 + MIDIノート変換 +
+│                         オクターブ正規化
+└── loop_detector.h       YIN周期ベースのループポイント自動検出
+                          （smplチャンクが無い場合のフォールバック）
 ```
 
 `wav_reader.h` と `codec.cpp` は WAV ヘッダパースのロジックが重複している
@@ -93,6 +96,23 @@ src/
 - `"auto"` 推定は信頼度閾値 `YIN_CONFIDENCE_THRESHOLD`（0.75）を下回ると
   デフォルト値69にフォールバックする。フォールバック時は stderr に警告を
   出す（既存の動作。変更する場合はREADME.mdも合わせて更新）。
+- `loop`: `"none"`・省略(解析なし) / `"auto"`(smplチャンク優先→YIN自動検出
+  フォールバック) / `{"start_sample":N,"end_sample":M}`(明示指定、
+  リサンプリング後サンプル単位) の3系統。パースは `main.cpp` の
+  `parseLoopField` ラムダ、決定ロジックは `resolveLoop()` に集約。
+  `root_note` と異なり、指定が無い場合は出力JSONに loop 関連フィールドを
+  一切含めない（オプトイン方式）。
+  - smplチャンク読み取りは `wav_reader.h` の `readSmplLoop()`。
+  - 自動検出は `loop_detector.h` の `detectLoopPoints()`。信頼度閾値
+    `LOOP_CONFIDENCE_THRESHOLD`（0.5）未満は検出失敗としてフォールバック
+    （非周期音・打楽器・SE等は対象外というroot_note "auto"と同じ思想）。
+  - `main.cpp` の `mapSampleIndexToResampled()` で、元WAVサンプル
+    インデックス（smplチャンク・自動検出とも元WAVドメインで計算）を
+    リサンプリング後（エンコード対象）のサンプルインデックスへ変換する。
+    この変換式は `codec.cpp` の `resampling()` の蓄積誤差アルゴリズムと
+    厳密に一致させる必要がある（ズレるとADPCMニブル境界がずれてループ点
+    が破綻する）。`resampling()` のロジックを変更する場合はこの関数も
+    合わせて見直すこと。
 
 ## 変更時の注意
 

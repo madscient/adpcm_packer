@@ -6,6 +6,7 @@
 #include "codec.h"
 #include "wav_reader.h"
 #include "pitch_estimator.h"
+#include "loop_detector.h"
 #include <nlohmann/json.hpp>
 
 #include <iostream>
@@ -44,12 +45,22 @@ enum class RootNoteMode {
     None,   // "none" または省略: デフォルト 69
 };
 
+// loop (ループポイント) の指定モード
+enum class LoopMode {
+    None,   // "none" または省略: ループ解析を行わない (デフォルト)
+    Auto,   // "auto": smpl チャンク読み取り → 無ければ自動検出
+    Fixed,  // {"start_sample":N,"end_sample":M}: 明示指定 (リサンプリング後サンプル単位)
+};
+
 struct WavEntry {
     std::string  path;
     std::string  name;
     RootNoteMode rootNoteMode = RootNoteMode::None;
     int          rootNoteFixed = 69; // mode == Fixed のときのみ有効
     int          octave = -1;        // -1 = 制約なし ("none" または省略)
+    LoopMode     loopMode = LoopMode::None;
+    uint32_t     loopFixedStart = 0; // mode == Fixed のときのみ有効
+    uint32_t     loopFixedEnd   = 0; // mode == Fixed のときのみ有効
 };
 
 struct Params {
@@ -268,6 +279,50 @@ static Params loadParams(const std::string& jsonPath)
         return v;
     };
 
+    // loop フィールドのパース
+    // 省略/"none" (解析しない) / "auto" (smplチャンク→自動検出) /
+    // {"start_sample":N,"end_sample":M} (明示指定) を受け付ける
+    auto parseLoopField = [](const json& item, const std::string& entryPath,
+                              LoopMode& outMode, uint32_t& outStart, uint32_t& outEnd)
+    {
+        outMode  = LoopMode::None;
+        outStart = 0;
+        outEnd   = 0;
+        if (!item.contains("loop")) return;
+
+        const auto& lp = item["loop"];
+        if (lp.is_string()) {
+            std::string s = toLower(lp.get<std::string>());
+            if (s == "none") {
+                outMode = LoopMode::None;
+            } else if (s == "auto") {
+                outMode = LoopMode::Auto;
+            } else {
+                throw std::runtime_error(
+                    "'" + entryPath + "' の loop に無効な文字列です: \"" + s + "\""
+                    " (\"auto\"、\"none\"、または {start_sample,end_sample} オブジェクトを指定)");
+            }
+        } else if (lp.is_object()) {
+            if (!lp.contains("start_sample") || !lp["start_sample"].is_number_integer() ||
+                !lp.contains("end_sample")   || !lp["end_sample"].is_number_integer())
+                throw std::runtime_error(
+                    "'" + entryPath + "' の loop オブジェクトには "
+                    "start_sample / end_sample (整数) が必要です");
+            int64_t startV = lp["start_sample"].get<int64_t>();
+            int64_t endV   = lp["end_sample"].get<int64_t>();
+            if (startV < 0 || endV < 0 || endV <= startV)
+                throw std::runtime_error(
+                    "'" + entryPath + "' の loop は 0 <= start_sample < end_sample を満たす必要があります");
+            outMode  = LoopMode::Fixed;
+            outStart = static_cast<uint32_t>(startV);
+            outEnd   = static_cast<uint32_t>(endV);
+        } else {
+            throw std::runtime_error(
+                "'" + entryPath + "' の loop は \"auto\"/\"none\" または "
+                "{start_sample,end_sample} オブジェクトを指定してください");
+        }
+    };
+
     for (auto& item : root["wav_files"]) {
         WavEntry entry;
         if (item.is_string()) {
@@ -277,6 +332,7 @@ static Params loadParams(const std::string& jsonPath)
             entry.rootNoteMode  = RootNoteMode::None;
             entry.rootNoteFixed = 69;
             entry.octave        = -1;
+            entry.loopMode      = LoopMode::None;
         } else if (item.is_object()) {
             if (!item.contains("path") || !item["path"].is_string())
                 throw std::runtime_error("wav_files の各オブジェクト要素に 'path' (string) が必要です");
@@ -286,6 +342,7 @@ static Params loadParams(const std::string& jsonPath)
                        : autoName(entry.path);
             parseRootNoteField(item, entry.path, entry.rootNoteMode, entry.rootNoteFixed);
             entry.octave = parseOctaveField(item, entry.path);
+            parseLoopField(item, entry.path, entry.loopMode, entry.loopFixedStart, entry.loopFixedEnd);
         } else {
             throw std::runtime_error("wav_files の各要素はパス文字列またはオブジェクトである必要があります");
         }
@@ -386,6 +443,104 @@ static RootNoteDecision resolveRootNote(
 }
 
 // ============================================================
+// リサンプリング後サンプルインデックスへの変換
+//
+// codec.cpp の resampling() は蓄積誤差法でソースサンプルごとに
+// dstRate を加算し、srcRate を超えるたびに1サンプル出力する。
+// これは N 個のソースサンプルを処理した時点の出力サンプル数が
+// floor(N * dstRate / srcRate) に厳密に一致する（剰余がそのまま
+// 次回へ持ち越されるため）。ループポイント変換はこの式をそのまま
+// 使うことで、encode() が生成するADPCMニブル列のインデックスと
+// 1:1で対応させる。
+// ============================================================
+static uint32_t mapSampleIndexToResampled(uint32_t srcIndex, uint32_t srcRate, uint32_t dstRate)
+{
+    return static_cast<uint32_t>(
+        (static_cast<uint64_t>(srcIndex) * dstRate) / srcRate);
+}
+
+// ============================================================
+// loop (ループポイント) 決定
+// WAV の smpl チャンクを優先し、無ければ YIN ベースの自動検出に
+// フォールバックする。値はリサンプリング後 (エンコード対象) の
+// サンプル単位で返す。
+// ============================================================
+struct LoopDecision {
+    bool        hasLoop     = false;
+    uint32_t    startSample = 0; // リサンプリング後サンプル単位 (包含)
+    uint32_t    endSample   = 0; // リサンプリング後サンプル単位 (包含)
+    std::string source;          // "smpl_chunk" / "auto_detected" / "fixed"
+};
+
+static LoopDecision resolveLoop(
+    const WavEntry&              entry,
+    const std::vector<uint8_t>&  wavRaw,
+    uint32_t                     targetSampleRate)
+{
+    LoopDecision result{};
+
+    if (entry.loopMode == LoopMode::None) {
+        return result;
+    }
+
+    // Fixed: ユーザー指定値をそのまま使う (リサンプリング後サンプル単位で指定される想定。
+    // auto 実行結果の loop_start_sample/loop_end_sample をそのまま書き戻せるようにする)
+    if (entry.loopMode == LoopMode::Fixed) {
+        result.hasLoop     = true;
+        result.startSample = entry.loopFixedStart;
+        result.endSample   = entry.loopFixedEnd;
+        result.source      = "fixed";
+        return result;
+    }
+
+    // Auto: smpl チャンク判定・自動検出のいずれにも元WAVのPCM/サンプルレートが必要
+    std::vector<int16_t> mono;
+    uint32_t              wavSampleRate = 0;
+    try {
+        auto [m, sr] = extractMonoPcm(wavRaw.data(), wavRaw.size());
+        mono          = std::move(m);
+        wavSampleRate = sr;
+    } catch (const std::exception& e) {
+        std::cerr << "[warn] PCM 取り出し失敗 (" << e.what()
+                  << ") → ループポイント検出をスキップします\n";
+        return result;
+    }
+
+    // 1. smpl チャンク優先
+    if (auto smpl = readSmplLoop(wavRaw.data(), wavRaw.size())) {
+        uint32_t start = mapSampleIndexToResampled(smpl->first,  wavSampleRate, targetSampleRate);
+        uint32_t end   = mapSampleIndexToResampled(smpl->second, wavSampleRate, targetSampleRate);
+        if (end > start) {
+            result.hasLoop     = true;
+            result.startSample = start;
+            result.endSample   = end;
+            result.source      = "smpl_chunk";
+            return result;
+        }
+        std::cerr << "[warn] smpl チャンクのループ範囲がリサンプリング後に潰れました ("
+                  << entry.path << ") → 自動検出にフォールバックします\n";
+    }
+
+    // 2. YIN ベースの自動検出
+    LoopDetectResult detected = detectLoopPoints(mono, wavSampleRate);
+    if (!detected.found) {
+        std::cerr << "[warn] ループポイントの自動検出に失敗しました (" << entry.path
+                  << ") → ループ情報なしで出力します\n";
+        return result;
+    }
+
+    result.hasLoop     = true;
+    result.startSample = mapSampleIndexToResampled(detected.startSample, wavSampleRate, targetSampleRate);
+    result.endSample   = mapSampleIndexToResampled(detected.endSample,   wavSampleRate, targetSampleRate);
+    result.source      = "auto_detected";
+
+    std::cout << "\n    [loop] auto detected  confidence=" << detected.confidence
+              << "  start=" << result.startSample << " end=" << result.endSample << " ";
+
+    return result;
+}
+
+// ============================================================
 // メイン処理
 // ============================================================
 int main(int argc, char* argv[])
@@ -425,6 +580,12 @@ int main(int argc, char* argv[])
         uint32_t    size;
         uint32_t    paddedSize;
         int         rootNote;
+        bool        hasLoop;
+        uint32_t    loopStartSample; // リサンプリング後サンプル単位 (包含)
+        uint32_t    loopEndSample;   // 同上 (包含)
+        uint32_t    loopStartByte;   // 出力バイナリ内の絶対バイトオフセット
+        uint32_t    loopEndByte;     // 同上 (包含)
+        std::string loopSource;
     };
 
     std::vector<EntryInfo> entries;
@@ -459,6 +620,9 @@ int main(int argc, char* argv[])
             }
         }
 
+        // --- loop 決定 ---
+        LoopDecision loopDec = resolveLoop(we, wavRaw, params.sampleRate);
+
         // --- ADPCM エンコード ---
         DWORD adpcmSize = 0;
         BYTE* pAdpcm = encoder->waveToAdpcm(
@@ -475,7 +639,31 @@ int main(int argc, char* argv[])
         }
 
         uint32_t paddedSize = alignUp(adpcmSize, params.boundary);
-        entries.push_back({ we.name, currentOffset, adpcmSize, paddedSize, rnd.midiNote });
+
+        // --- loop サンプル範囲 → バイトオフセット変換 (2サンプル=1バイト) ---
+        // resampling() は 64サンプル境界まで無音パディングしてからエンコードするため、
+        // 実データ末尾 (adpcmSize*2 サンプル) を超える範囲は縮めて安全側に倒す。
+        bool     entryHasLoop = false;
+        uint32_t startSample = 0, endSample = 0;
+        uint32_t loopStartByte = 0, loopEndByte = 0;
+        if (loopDec.hasLoop) {
+            const uint32_t totalResampledSamples = adpcmSize * 2;
+            startSample = std::min(loopDec.startSample, totalResampledSamples > 0 ? totalResampledSamples - 1 : 0);
+            endSample   = std::min(loopDec.endSample,   totalResampledSamples > 0 ? totalResampledSamples - 1 : 0);
+            if (totalResampledSamples > 0 && endSample > startSample) {
+                entryHasLoop = true;
+                loopStartByte = currentOffset + startSample / 2;
+                loopEndByte   = currentOffset + endSample   / 2;
+            } else {
+                std::cerr << "[warn] loop 範囲がエンコード結果の範囲外のため無視します ("
+                          << we.path << ")\n";
+            }
+        }
+
+        entries.push_back({
+            we.name, currentOffset, adpcmSize, paddedSize, rnd.midiNote,
+            entryHasLoop, startSample, endSample, loopStartByte, loopEndByte, loopDec.source
+        });
 
         binData.insert(binData.end(), pAdpcm, pAdpcm + adpcmSize);
         binData.resize(currentOffset + paddedSize, 0x00);
@@ -522,6 +710,16 @@ int main(int argc, char* argv[])
             entry["padded_size"] = e.paddedSize;
             entry["end_hex"]     = hexEnd;
             entry["root_note"]   = e.rootNote;
+            if (e.hasLoop) {
+                char hexLoopStart[16], hexLoopEnd[16];
+                std::snprintf(hexLoopStart, sizeof(hexLoopStart), "0x%06X", e.loopStartByte);
+                std::snprintf(hexLoopEnd,   sizeof(hexLoopEnd),   "0x%06X", e.loopEndByte);
+                entry["loop_start_sample"] = e.loopStartSample;
+                entry["loop_end_sample"]   = e.loopEndSample;
+                entry["loop_start_hex"]    = hexLoopStart;
+                entry["loop_end_hex"]      = hexLoopEnd;
+                entry["loop_source"]       = e.loopSource;
+            }
             arr.push_back(std::move(entry));
         }
         out["entries"] = std::move(arr);

@@ -1,0 +1,33 @@
+{
+  "codec": "adpcm-b",
+  "sample_rate": 16000,
+  "boundary": 256,
+  "output_bin": "output/test_loop.bin",
+  "output_json": "output/test_loop.json",
+  "wav_files": [
+    {
+      "path": "test/wav/test_loop_smpl.wav",
+      "name": "loop_from_smpl_chunk",
+      "loop": "auto"
+    },
+    {
+      "path": "test/wav/test_loop_auto.wav",
+      "name": "loop_auto_detected",
+      "loop": "auto"
+    },
+    {
+      "path": "test/wav/test_noise.wav",
+      "name": "loop_detect_fallback",
+      "loop": "auto"
+    },
+    {
+      "path": "test/wav/test_loop_auto.wav",
+      "name": "loop_fixed_override",
+      "loop": { "start_sample": 1000, "end_sample": 5000 }
+    },
+    {
+      "path": "test/wav/test_loop_auto.wav",
+      "name": "loop_none"
+    }
+  ]
+}

@@ -75,7 +75,8 @@ adpcm_packer <params.json>
       "path":      "piano_a4.wav",
       "name":      "piano",        // 出力 JSON 内ラベル（省略時はファイル名から自動生成）
       "root_note": "A4",           // ルートノート（省略時は "none" 扱い → 69）
-      "octave":    4               // オクターブ制約（省略時は制約なし）
+      "octave":    4,              // オクターブ制約（省略時は制約なし）
+      "loop":      "auto"          // ループポイント（省略時は解析しない）
     },
     "se3.wav"                      // 文字列のみの簡略記法も可
   ]
@@ -162,6 +163,38 @@ FITOM_X 側がこの値を基準に再生速度（DeltaN 等）を算出しま�
 { "path": "piano_e4.wav", "root_note": "E4", "octave": 3 }
 ```
 
+### loop
+
+サステイン楽器音（オルガン、ストリングス等）向けのループポイントを指定します。
+`loop_start_hex` / `loop_end_hex` はチップのループ制御アドレスとして、
+`loop_start_sample` / `loop_end_sample` は再生タイミング計算等に使用できます。
+
+| 指定値 | 型 | 動作 |
+|---|---|---|
+| `"none"` または省略 | string / 省略 | ループ解析を行わない（デフォルト。出力にループ関連フィールドは含まれない） |
+| `"auto"` | string | WAV の `smpl` チャンクを優先的に読み取り、無ければ YIN アルゴリズムで自動検出する |
+| `{"start_sample": N, "end_sample": M}` | object | 明示指定（リサンプリング後サンプル単位、`start_sample < end_sample`） |
+
+**`"auto"` の挙動:**
+
+1. WAV に `smpl` チャンク（サウンドツール側で設定済みのループ情報）があれば、それを優先して使用する。
+2. 無い場合、基本周期の整数倍をループ長として、接続点（ループ終端→始端）の波形連続性
+   （値・傾き）が最も良くなる区間を自動検出する。単音のサステイン楽器音が対象で、
+   `root_note: "auto"` と同様に信頼度が一定未満の場合（打楽器・SE・和音など非周期音）は
+   検出失敗として警告を出し、ループ情報なしにフォールバックする。
+
+**既知の制約:** ADPCM は差分符号化のため、ループ再生時（ループ終端から始端へジャンプする
+瞬間）にデコーダの内部状態（予測値・ステップサイズ）が不連続になり、微小なクリック音が
+生じる場合があります。これはコーデックの性質上の制約であり、本ツールでは補正しません。
+
+```jsonc
+// 例: smpl チャンクがあればそれを使用、無ければ自動検出
+{ "path": "organ_c4.wav", "root_note": "C4", "loop": "auto" }
+
+// 例: 自動検出結果を手動で微調整する
+{ "path": "organ_c4.wav", "root_note": "C4", "loop": { "start_sample": 8820, "end_sample": 12829 } }
+```
+
 ## 入力 WAV の要件
 
 | 項目 | 対応仕様 |
@@ -187,7 +220,12 @@ FITOM_X 側がこの値を基準に再生速度（DeltaN 等）を算出しま�
       "size":        4000,
       "padded_size": 4096,
       "end_hex":     "0x000FFF",
-      "root_note":   69
+      "root_note":   69,
+      "loop_start_sample": 8820,
+      "loop_end_sample":   12829,
+      "loop_start_hex":    "0x0008A4",
+      "loop_end_hex":      "0x000C89",
+      "loop_source":       "smpl_chunk"
     }
   ]
 }
@@ -200,9 +238,13 @@ FITOM_X 側がこの値を基準に再生速度（DeltaN 等）を算出しま�
 | `padded_size` | バウンダリ整列後のバイト数 |
 | `end_hex` | パディング込み末尾アドレス |
 | `root_note` | MIDI ノート番号（常に出力。省略なし） |
+| `loop_start_sample` / `loop_end_sample` | ループ範囲（リサンプリング後サンプル単位、包含。`loop` 指定時のみ出力） |
+| `loop_start_hex` / `loop_end_hex` | ループ範囲のバイナリ内絶対バイトアドレス（同上） |
+| `loop_source` | ループ範囲の取得元: `"smpl_chunk"` / `"auto_detected"` / `"fixed"`（同上） |
 
 `offset_hex` / `end_hex` は YM チップのスタート/エンドアドレスレジスタに
-そのまま使用できます。
+そのまま使用できます。`loop_start_hex` / `loop_end_hex` も同様にループ制御用の
+アドレスレジスタにそのまま使用できます。
 
 ## プロジェクト構成
 
@@ -217,8 +259,9 @@ adpcm_packer/
 │   ├── main.cpp                # エントリポイント・パラメータ処理・パッキング
 │   ├── codec.h                 # ADPCM エンコーダ宣言
 │   ├── codec.cpp               # ADPCM エンコーダ実装 (ADPCM-B / ADPCM-A)
-│   ├── wav_reader.h            # WAV → 16bit モノラル PCM 取り出しユーティリティ
-│   └── pitch_estimator.h       # YIN アルゴリズムによる基本周波数推定
+│   ├── wav_reader.h            # WAV → 16bit モノラル PCM 取り出しユーティリティ・smplチャンク読取
+│   ├── pitch_estimator.h       # YIN アルゴリズムによる基本周波数推定
+│   └── loop_detector.h         # YIN周期ベースのループポイント自動検出
 │
 ├── extern/
 │   └── nlohmann_json/          # JSON ライブラリ (git submodule)

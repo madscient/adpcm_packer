@@ -38,6 +38,7 @@ add_executable(adpcm_packer
     src/codec.h
     src/wav_reader.h
     src/pitch_estimator.h
+    src/loop_detector.h
 )
 
 target_include_directories(adpcm_packer PRIVATE src)
