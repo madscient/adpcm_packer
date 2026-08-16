@@ -1,0 +1,13 @@
+{
+  "codec": "ssgs",
+  "sample_rate": 32000,
+  "boundary": 256,
+  "output_bin": "output/test_ssgs_persample_rate.bin",
+  "output_json": "output/test_ssgs_persample_rate.json",
+  "wav_files": [
+    { "path": "test/wav/test_440hz_44100_mono.wav", "name": "rate_32k_default" },
+    { "path": "test/wav/test_440hz_44100_mono.wav", "name": "rate_16k", "sample_rate": 16000 },
+    { "path": "test/wav/test_440hz_44100_mono.wav", "name": "rate_8k",  "sample_rate": 8000 },
+    { "path": "test/wav/test_440hz_44100_mono.wav", "name": "rate_4k",  "sample_rate": 4000 }
+  ]
+}

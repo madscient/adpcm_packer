@@ -9,8 +9,8 @@
   "properties": {
     "codec": {
       "type": "string",
-      "enum": ["adpcm-b", "adpcm-a", "ymz280", "opl4"],
-      "description": "adpcm-b: YM2608/YM2610 ADPCM-B / adpcm-a: YM2610 ADPCM-A / ymz280: YMZ280B / opl4: OPL4 (YMF278B)"
+      "enum": ["adpcm-b", "adpcm-a", "ymz280", "opl4", "ssgs"],
+      "description": "adpcm-b: YM2608/YM2610 ADPCM-B / adpcm-a: YM2610 ADPCM-A / ymz280: YMZ280B / opl4: OPL4 (YMF278B) / ssgs: YMZ705(SSGS)・YMZ732(SSGS2)"
     },
     "format": {
       "type": "string",
@@ -19,7 +19,7 @@
     },
     "sample_rate": {
       "type": "integer",
-      "description": "adpcm-b: 8000/16000/24000/32000。adpcm-a: 指定不要(18518Hz固定、指定しても無視)。ymz280/opl4: codec/formatごとの範囲内の任意の整数Hz。"
+      "description": "adpcm-b: 8000/16000/24000/32000。adpcm-a: 指定不要(18518Hz固定、指定しても無視)。ymz280/opl4: codec/formatごとの範囲内の任意の整数Hz。ssgs: 4000/8000/16000/32000。"
     },
     "boundary": {
       "type": "integer",
@@ -89,7 +89,7 @@
             "sample_rate": {
               "type": "integer",
               "minimum": 1,
-              "description": "codec が 'ymz280'/'opl4' のときのみ有効なper-entry上書き。それ以外のcodecでは警告のうえ無視される。"
+              "description": "codec が 'ymz280'/'opl4'/'ssgs' のときのみ有効なper-entry上書き。それ以外のcodecでは警告のうえ無視される。ssgs では 4000/8000/16000/32000 のいずれか。"
             }
           }
         }
@@ -166,6 +166,32 @@
         "required": ["sample_rate"],
         "properties": {
           "sample_rate": { "minimum": 1, "maximum": 192000 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "codec": { "const": "ssgs" } },
+        "required": ["codec"]
+      },
+      "then": {
+        "required": ["sample_rate"],
+        "properties": {
+          "sample_rate": { "enum": [4000, 8000, 16000, 32000] },
+          "wav_files": {
+            "maxItems": 64,
+            "items": {
+              "anyOf": [
+                { "type": "string" },
+                {
+                  "type": "object",
+                  "properties": {
+                    "sample_rate": { "enum": [4000, 8000, 16000, 32000] }
+                  }
+                }
+              ]
+            }
+          }
         }
       }
     }

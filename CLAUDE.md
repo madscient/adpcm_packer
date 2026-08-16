@@ -12,13 +12,15 @@
 `adpcm_packer` は、複数の WAV ファイルを ADPCM / リニアPCM エンコードし、
 バウンダリ境界で整列させたバイナリイメージ（サウンドROM用データ）を生成する
 CLI ツールです。YM2608 / YM2610（ADPCM-A/B）、YMZ280B（4bit ADPCM / 8bit・
-16bit PCM）、OPL4 = YMF278B（8bit・12bit・16bit PCM、レトロゲーム機や
-サウンドボードで使われる音源チップ群）向けのサウンドデータ制作パイプライン
-の一部として使われます。
+16bit PCM）、OPL4 = YMF278B（8bit・12bit・16bit PCM）、YMZ705 = SSGS /
+YMZ732 = SSGS2（4bit ADPCM、レトロゲーム機やサウンドボードで使われる音源
+チップ群）向けのサウンドデータ制作パイプラインの一部として使われます。
 
 出力される `offset_hex` / `end_hex` はチップのレジスタに直接書き込む値になる
 ため、フォーマットの互換性（特にバイト境界とオフセット計算）は最優先で守る
-必要があります。
+必要があります。`ssgs` はさらに、チップが直接読み出すアドレステーブルを
+出力バイナリ自体に書き込むため、テーブルのレイアウトとアドレス値の正しさが
+そのまま実機動作を左右します。
 
 ## ビルド
 
@@ -75,7 +77,9 @@ done
 src/
 ├── main.cpp             パラメータJSON読み込み・パッキング処理・出力JSON生成
 ├── codec.h / codec.cpp   ADPCMエンコーダ本体（YmDeltaTEncoder = ADPCM-B,
-│                         Ym2610AEncoder = ADPCM-A）。実機互換性最優先。
+│                         Ym2610AEncoder = ADPCM-A,
+│                         Ymz280AdpcmEncoder = YMZ280B / SSGS 共通）。
+│                         実機互換性最優先。
 ├── wav_reader.h          WAV→16bitモノラルPCM取り出し（ピッチ推定・ループ検出専用。
 │                         codec.cpp 内の WAV パースとは独立している）。
 │                         smpl チャンク読み取り (readSmplLoop) もここ。
@@ -94,6 +98,20 @@ src/
 
 詳細仕様は README.md を正とする。ここでは実装上のポイントのみ記載。
 
+- `codec`: `adpcm-b` / `adpcm-a` / `ymz280` / `opl4` / `ssgs`。
+  `format` を持つのは `ymz280` / `opl4` のみ (`codecHasFormat()`)、per-entry
+  `sample_rate` 上書きを許すのは `ymz280` / `opl4` / `ssgs`
+  (`codecSupportsPerEntryRate()`)。この2つは対象が異なるので混同しないこと。
+- `ssgs` (YMZ705/YMZ732): 出力バイナリの `$000000`〜`$00023F` がボイス
+  アドレステーブル領域で、ボイスデータは `$000240` (`ssgs::DATA_AREA_BASE`)
+  から始まる。23bitアドレスを L/M/H の3プレーンに分けて格納する
+  (`writeSsgsVoiceTable()`)。ROMテーブルに書くエンドアドレスは**実データ末尾
+  (包含)** でパディングを含まない。YMZ732 のシンプルアクセスコード用テーブル
+  (`$000240`〜`$00047F`) には非対応で、YMZ705 と同一レイアウトとして扱う
+  (ユーザー判断)。4bit ADPCM のエンコーダは YMZ280B と同一
+  (`Ymz280AdpcmEncoder`)。ヘッダ領域があるぶん先頭ボイスのオフセットが
+  boundary の倍数とは限らないため、各エントリのオフセットは
+  `alignUp(currentOffset, boundary)` で都度求めている。
 - `root_note`: 整数(0-127) / ノート名文字列("C-1"〜"G9") / `"auto"`
   (YIN推定) / `"none"`・省略(デフォルト69) の4系統を受け付ける。
   パースは `main.cpp` の `parseRootNoteField` ラムダと `noteNameToMidi`

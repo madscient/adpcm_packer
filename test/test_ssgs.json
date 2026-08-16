@@ -1,0 +1,17 @@
+{
+  "codec": "ssgs",
+  "sample_rate": 16000,
+  "boundary": 32,
+  "output_bin": "output/test_ssgs.bin",
+  "output_json": "output/test_ssgs.json",
+  "wav_files": [
+    { "path": "test/wav/test_440hz_44100_mono.wav",   "name": "se_440hz_mono_44100", "root_note": "A4" },
+    { "path": "test/wav/test_880hz_22050_stereo.wav", "name": "se_880hz_stereo_22050" },
+    {
+      "path": "test/wav/test_loop_smpl.wav",
+      "name": "loop_from_smpl_chunk",
+      "loop": "auto"
+    },
+    "test/wav/test_noise.wav"
+  ]
+}

@@ -3,7 +3,8 @@
 複数の WAV ファイルを ADPCM / リニアPCM エンコードし、バウンダリ境界で
 整列させたバイナリイメージを生成するツールです。  
 YM2608 (ADPCM-B)、YM2610 (ADPCM-A)、YMZ280B (4bit ADPCM / 8bit・16bit
-リニアPCM)、OPL4 = YMF278B (8bit・12bit・16bit リニアPCM) に対応しています。
+リニアPCM)、OPL4 = YMF278B (8bit・12bit・16bit リニアPCM)、
+YMZ705 = SSGS / YMZ732 = SSGS2 (4bit ADPCM) に対応しています。
 
 ## 必要要件
 
@@ -65,11 +66,12 @@ adpcm_packer <params.json>
 
 ```jsonc
 {
-  "codec":       "adpcm-b",        // "adpcm-b" / "adpcm-a" / "ymz280" / "opl4"
+  "codec":       "adpcm-b",        // "adpcm-b" / "adpcm-a" / "ymz280" / "opl4" / "ssgs"
   "format":      "pcm8",           // "ymz280"/"opl4" のときのみ必須 (下記 format 節を参照)
   "sample_rate": 16000,            // ADPCM-B: 8000/16000/24000/32000 Hz
                                    // ADPCM-A: 指定不要（18518 Hz 固定）
                                    // ymz280/opl4: format 節の範囲内で任意の整数Hz
+                                   // ssgs: 4000/8000/16000/32000 Hz
   "boundary":    256,              // バウンダリ境界: 32 または 256 バイト
   "output_bin":  "output.bin",     // 出力バイナリファイルパス
   "output_json": "output.json",    // 出力オフセット一覧 JSON パス
@@ -80,7 +82,7 @@ adpcm_packer <params.json>
       "root_note":   "A4",           // ルートノート（省略時は "none" 扱い → 69）
       "octave":      4,              // オクターブ制約（省略時は制約なし）
       "loop":        "auto",         // ループポイント（省略時は解析しない）
-      "sample_rate": 22050           // ymz280/opl4 のみ有効。このファイルだけ個別のレートで
+      "sample_rate": 22050           // ymz280/opl4/ssgs のみ有効。このファイルだけ個別のレートで
                                      // エンコードしたい場合に指定（省略時はトップレベルの値）
     },
     "se3.wav"                      // 文字列のみの簡略記法も可
@@ -96,6 +98,7 @@ adpcm_packer <params.json>
 | `adpcm-a` | Ym2610AEncoder       | YM2610 ADPCM-A         | (不要) |
 | `ymz280`  | Ymz280AdpcmEncoder / LinearPcm8Encoder / LinearPcm16LEEncoder | YMZ280B | `"adpcm"` / `"pcm8"` / `"pcm16"` (必須) |
 | `opl4`    | LinearPcm8Encoder / Opl4Pcm12Encoder / LinearPcm16BEEncoder   | OPL4 (YMF278B)          | `"pcm8"` / `"pcm12"` / `"pcm16"` (必須) |
+| `ssgs`    | Ymz280AdpcmEncoder   | YMZ705 (SSGS), YMZ732 (SSGS2) | (不要) |
 
 `ymz280`/`opl4` は `format` フィールド (string) で出力データフォーマットを
 選択します（省略・不正値はエラー）。それ以外の codec で `format` を
@@ -109,6 +112,9 @@ adpcm_packer <params.json>
 - 16bit PCMのエンディアンはチップにより異なります: YMZ280Bは
   **リトルエンディアン**、OPL4は**ビッグエンディアン**（データシート記載の
   実装に合わせています）。
+- `ssgs` (YMZ705 / YMZ732) の 4bit ADPCM は YMZ280B と同一フォーマットです。
+  出力バイナリはボイスデータだけでなくアドレステーブルを含む ROM イメージ
+  全体になります（後述の `ssgs` 節を参照）。
 
 ### sample_rate
 
@@ -119,10 +125,11 @@ adpcm_packer <params.json>
 | `ymz280` + `format:"adpcm"`  | 1〜44100 Hz の任意の整数 |
 | `ymz280` + `format:"pcm8"/"pcm16"` | 1〜88200 Hz の任意の整数 |
 | `opl4`（全 format） | 1〜192000 Hz の任意の整数 |
+| `ssgs` | `4000` / `8000` / `16000` / `32000` のいずれか |
 
 入力 WAV のサンプリング周波数は自動検出してリサンプリングします。
 
-**per-entry 上書き（`ymz280`/`opl4` のみ）:** YMZ280B・OPL4 は実チップ側で
+**per-entry 上書き（`ymz280`/`opl4`/`ssgs` のみ）:** これらのチップは実チップ側で
 チャンネルごとに独立した再生レートを持てるため、`wav_files` の各エントリで
 `sample_rate` を個別に指定してトップレベルの値を上書きできます
 （`adpcm-a`/`adpcm-b` では上書き不可。指定しても警告のうえ無視されます）。
@@ -136,6 +143,60 @@ adpcm_packer <params.json>
 |---|---|
 | `32`  | ADPCM-A (YM2610 は 32 byte 境界) |
 | `256` | ADPCM-B (YM2608/YM2610 は 256 byte 境界)、YMZ280B、OPL4 |
+
+`ssgs` はアドレステーブルで任意のバイトアドレスを指定できるため、
+どちらの値も使用できます。
+
+### ssgs (YMZ705 / YMZ732) の ROM イメージ
+
+`codec: "ssgs"` では、ボイスデータだけでなく**チップが直接読み出す
+アドレステーブルを含む ROM イメージ全体**を出力します。
+
+| アドレス | 内容 |
+|---|---|
+| `$000000`〜`$00003F` | ADPCM音 No.0〜63 スタートアドレス (L) |
+| `$000040`〜`$00007F` | ADPCM音 No.0〜63 スタートアドレス (M) |
+| `$000080`〜`$0000BF` | ADPCM音 No.0〜63 スタートアドレス (H) |
+| `$0000C0`〜`$0000FF` | ADPCM音 No.0〜63 エンドアドレス (L) |
+| `$000100`〜`$00013F` | ADPCM音 No.0〜63 エンドアドレス (M) |
+| `$000140`〜`$00017F` | ADPCM音 No.0〜63 エンドアドレス (H) |
+| `$000180`〜`$00023F` | 曲 No.0〜63 データスタートアドレス (L/M/H) — `0x00` 埋め |
+| `$000240`〜 | ボイスデータ領域 |
+
+- 23bit アドレス (MA22〜MA0) を L=bit7-0 / M=bit15-8 / H=bit22-16 の
+  3プレーンに分割し、`wav_files` の並び順をそのままボイス番号
+  (ADPCM音ナンバー) として格納します。
+- 曲データを生成する機能は持たないため、曲データ用テーブルおよび
+  未使用のボイススロットは `0x00` 埋めになります。
+- **エンドアドレスは実データの最終バイト（包含）**です。バウンダリ
+  整列のパディングは再生範囲に含まれません。
+- YMZ732 は `$000240`〜`$00047F` にシンプルアクセスコード用テーブルを
+  持ちますが、本ツールはシンプルアクセスモードに対応しないため、
+  YMZ705 と共通の `$000240` からボイスデータを配置します。この範囲で
+  両チップの ROM マップは互換です。
+
+| 制約 | 値 |
+|---|---|
+| 最大ボイス数 | 64 音（超過はエラー） |
+| 最大 ROM サイズ | 8 Mbyte (`$7FFFFF`、超過はエラー) |
+| サンプリング周波数 | 32k / 16k / 8k / 4kHz（チャンネルごとに選択可） |
+
+出力 JSON の各エントリには、ROM テーブルへ書き込んだ値と同じ
+`start_address` / `end_address` に加え、音指定レジスタの S1,S0 に
+書く値 `sampling_code` が出力されます。
+
+| `sampling_code` (S1,S0) | サンプリング周波数 |
+|---|---|
+| `0` (00) | 4 kHz |
+| `1` (01) | 8 kHz |
+| `2` (10) | 16 kHz |
+| `3` (11) | 32 kHz |
+
+> **Note**  
+> SSGS のチャンネルは KEY ON, LOOP レジスタの `LOOP` ビットでボイス全体
+> (スタート〜エンドアドレス) をループ再生する方式で、ループポイント指定用の
+> レジスタを持ちません。`loop` フィールドは指定可能ですが、出力される
+> ループ情報はドライバ側で利用する参考値です。
 
 ### root_note
 
@@ -289,6 +350,39 @@ FITOM_X 側がこの値を基準に再生速度（DeltaN 等）を算出しま�
 }
 ```
 
+`codec` が `ssgs` の場合は、トップレベルにボイスデータ領域の先頭
+`data_area_offset` が、各エントリに ROM のアドレステーブルへ書き込んだ値と
+同じ `start_address` / `end_address` が追加で出力されます:
+
+```jsonc
+{
+  "codec": "ssgs",
+  "sample_rate": 16000,
+  "boundary": 32,
+  "total_size": 18592,
+  "data_area_offset": 576,
+  "data_area_offset_hex": "0x000240",
+  "entries": [
+    {
+      "name": "se_440hz_mono_44100",
+      "offset": 576,
+      "offset_hex": "0x000240",
+      "size": 4000,
+      "padded_size": 4000,
+      "end_hex": "0x0011DF",
+      "root_note": 69,
+      "sample_rate": 16000,
+      "voice_no": 0,             // ADPCM音ナンバー（テーブル内インデックス）
+      "start_address": 576,
+      "start_address_hex": "0x000240",
+      "end_address": 4575,       // 実データ末尾（パディングを含まない）
+      "end_address_hex": "0x0011DF",
+      "sampling_code": 2         // 音指定レジスタの S1,S0 に書く値
+    }
+  ]
+}
+```
+
 | フィールド | 説明 |
 |---|---|
 | `offset` / `offset_hex` | バイナリ内の先頭オフセット |
@@ -296,7 +390,12 @@ FITOM_X 側がこの値を基準に再生速度（DeltaN 等）を算出しま�
 | `padded_size` | バウンダリ整列後のバイト数 |
 | `end_hex` | パディング込み末尾アドレス |
 | `root_note` | MIDI ノート番号（常に出力。省略なし） |
-| `sample_rate`（エントリ側。`ymz280`/`opl4` のみ） | そのエントリで実際にエンコードに使ったサンプルレート |
+| `sample_rate`（エントリ側。`ymz280`/`opl4`/`ssgs` のみ） | そのエントリで実際にエンコードに使ったサンプルレート |
+| `data_area_offset` / `data_area_offset_hex`（トップレベル。`ssgs` のみ） | ボイスデータ領域の先頭（アドレステーブル領域の直後） |
+| `voice_no`（`ssgs` のみ） | ROM のアドレステーブル内のインデックス（ADPCM音ナンバー、0〜63） |
+| `start_address` / `start_address_hex`（`ssgs` のみ） | ROM テーブルに書き込んだスタートアドレス（`offset` と同値） |
+| `end_address` / `end_address_hex`（`ssgs` のみ） | ROM テーブルに書き込んだエンドアドレス（実データ末尾、包含） |
+| `sampling_code`（`ssgs` のみ） | 音指定レジスタの S1,S0 の値（0:4k / 1:8k / 2:16k / 3:32kHz） |
 | `loop_start_sample` / `loop_end_sample` | ループ範囲（リサンプリング後サンプル単位、包含。`loop` 指定時のみ出力） |
 | `loop_start_hex` / `loop_end_hex` | ループ範囲のバイナリ内絶対バイトアドレス（同上） |
 | `loop_source` | ループ範囲の取得元: `"smpl_chunk"` / `"auto_detected"` / `"fixed"`（同上） |
@@ -367,7 +466,7 @@ adpcm_packer/
 ├── src/                        # ソースコード
 │   ├── main.cpp                # エントリポイント・パラメータ処理・パッキング
 │   ├── codec.h                 # エンコーダ宣言
-│   ├── codec.cpp               # エンコーダ実装 (ADPCM-B / ADPCM-A / YMZ280B / OPL4)
+│   ├── codec.cpp               # エンコーダ実装 (ADPCM-B / ADPCM-A / YMZ280B / OPL4 / SSGS)
 │   ├── wav_reader.h            # WAV → 16bit モノラル PCM 取り出しユーティリティ・smplチャンク読取
 │   ├── pitch_estimator.h       # YIN アルゴリズムによる基本周波数推定
 │   └── loop_detector.h         # YIN周期ベースのループポイント自動検出
@@ -390,6 +489,7 @@ adpcm_packer/
     ├── test_ymz280_pcm8.json / _pcm16.json
     ├── test_ymz280_persample_rate.json
     ├── test_opl4_pcm8.json / _pcm12.json / _pcm16.json
+    ├── test_ssgs.json / test_ssgs_persample_rate.json
     └── wav/
         └── *.wav
 ```

@@ -9,7 +9,7 @@
   "properties": {
     "codec": {
       "type": "string",
-      "enum": ["adpcm-b", "adpcm-a", "ymz280", "opl4"]
+      "enum": ["adpcm-b", "adpcm-a", "ymz280", "opl4", "ssgs"]
     },
     "format": {
       "type": "string",
@@ -19,7 +19,7 @@
     "sample_rate": {
       "type": "integer",
       "minimum": 1,
-      "description": "トップレベルのデフォルトサンプルレート。ymz280/opl4 ではエントリ側で上書きされている場合がある (entries[].sample_rate参照)。"
+      "description": "トップレベルのデフォルトサンプルレート。ymz280/opl4/ssgs ではエントリ側で上書きされている場合がある (entries[].sample_rate参照)。"
     },
     "boundary": {
       "type": "integer",
@@ -29,6 +29,15 @@
       "type": "integer",
       "minimum": 0,
       "description": "出力バイナリの総バイト数。"
+    },
+    "data_area_offset": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "codec が 'ssgs' のときのみ出力。ボイスデータ領域の先頭オフセット (アドレステーブル領域の直後)。"
+    },
+    "data_area_offset_hex": {
+      "$ref": "#/$defs/hexAddress",
+      "description": "codec が 'ssgs' のときのみ出力。data_area_offset の16進表記。"
     },
     "entries": {
       "type": "array",
@@ -56,7 +65,32 @@
         "sample_rate": {
           "type": "integer",
           "minimum": 1,
-          "description": "codec が 'ymz280'/'opl4' のときのみ出力。このエントリで実際に使ったサンプルレート。"
+          "description": "codec が 'ymz280'/'opl4'/'ssgs' のときのみ出力。このエントリで実際に使ったサンプルレート。"
+        },
+        "voice_no": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 63,
+          "description": "codec が 'ssgs' のときのみ出力。ROMのボイスアドレステーブル内のインデックス (ADPCM音ナンバー)。"
+        },
+        "start_address": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8388607,
+          "description": "codec が 'ssgs' のときのみ出力。ROMテーブルに書き込まれたスタートアドレス (= offset)。"
+        },
+        "start_address_hex": { "$ref": "#/$defs/hexAddress" },
+        "end_address": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8388607,
+          "description": "codec が 'ssgs' のときのみ出力。ROMテーブルに書き込まれたエンドアドレス (実データ末尾、包含。パディングは含まない)。"
+        },
+        "end_address_hex": { "$ref": "#/$defs/hexAddress" },
+        "sampling_code": {
+          "type": "integer",
+          "enum": [0, 1, 2, 3],
+          "description": "codec が 'ssgs' のときのみ出力。音指定レジスタの S1,S0 に書く値 (0:4kHz / 1:8kHz / 2:16kHz / 3:32kHz)。"
         },
         "loop_start_sample": { "type": "integer", "minimum": 0 },
         "loop_end_sample": { "type": "integer", "minimum": 0 },
@@ -76,17 +110,44 @@
       }
     }
   },
-  "if": {
-    "properties": { "codec": { "enum": ["ymz280", "opl4"] } },
-    "required": ["codec"]
-  },
-  "then": {
-    "required": ["format"],
-    "properties": {
-      "entries": {
-        "type": "array",
-        "items": { "required": ["sample_rate"] }
+  "allOf": [
+    {
+      "if": {
+        "properties": { "codec": { "enum": ["ymz280", "opl4"] } },
+        "required": ["codec"]
+      },
+      "then": {
+        "required": ["format"],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": { "required": ["sample_rate"] }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "codec": { "const": "ssgs" } },
+        "required": ["codec"]
+      },
+      "then": {
+        "required": ["data_area_offset", "data_area_offset_hex"],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "required": [
+                "sample_rate", "voice_no",
+                "start_address", "start_address_hex",
+                "end_address", "end_address_hex",
+                "sampling_code"
+              ]
+            }
+          }
+        }
       }
     }
-  }
+  ]
 }

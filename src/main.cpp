@@ -65,11 +65,70 @@ enum class CodecKind {
     Opl4Pcm8,     // OPL4/YMF278B 8bit リニアPCM
     Opl4Pcm12,    // OPL4/YMF278B 12bit リニアPCM (パック)
     Opl4Pcm16,    // OPL4/YMF278B 16bit リニアPCM (ビッグエンディアン)
+    Ssgs,         // YMZ705/YMZ732 (SSGS/SSGS2) 4bit ADPCM
 };
 
-// CodecKind が per-entry sample_rate 上書き・出力JSONへの
-// format/sample_rate 追加フィールドの対象かどうか
+// ============================================================
+// SSGS (YMZ705 / YMZ732) の外部ROMレイアウト
+//
+// ROM 先頭は ADPCM ボイス No.0〜63 のスタート/エンドアドレステーブルで、
+// 23bit アドレスを L/M/H の 3 プレーンに分けて 64 バイトずつ並べる。
+// 続く曲データ用テーブルは本ツールが生成対象としないため 0 埋めする。
+//
+// YMZ732 は $000240〜$00047F にシンプルアクセスコード用テーブルを持ち
+// データ領域が $000480 からになるが、シンプルアクセスモード非対応の前提
+// (ユーザー確認済み) なので YMZ705 と共通の $000240 からボイスデータを
+// 配置する。両チップはこの範囲でレジスタ・ROMマップとも互換。
+// ============================================================
+namespace ssgs {
+constexpr uint32_t MAX_VOICES     = 64;
+constexpr uint32_t DATA_AREA_BASE = 0x000240; // ボイスデータ領域の先頭
+constexpr uint32_t MAX_ADDRESS    = 0x7FFFFF; // MA22〜MA0 = 8Mbyte
+constexpr uint32_t TBL_START_L    = 0x000000;
+constexpr uint32_t TBL_START_M    = 0x000040;
+constexpr uint32_t TBL_START_H    = 0x000080;
+constexpr uint32_t TBL_END_L      = 0x0000C0;
+constexpr uint32_t TBL_END_M      = 0x000100;
+constexpr uint32_t TBL_END_H      = 0x000140;
+
+// チップ側が 32k/16k/8k/4kHz の4値からしか選べない
+inline bool isValidSampleRate(uint32_t sr)
+{
+    return sr == 4000 || sr == 8000 || sr == 16000 || sr == 32000;
+}
+
+// 音指定レジスタ ($40/$50/... の D7,D6 = S1,S0) に書く値
+inline int samplingCode(uint32_t sr)
+{
+    switch (sr) {
+        case 4000:  return 0;
+        case 8000:  return 1;
+        case 16000: return 2;
+        default:    return 3; // 32000
+    }
+}
+} // namespace ssgs
+
+// CodecKind が per-entry sample_rate 上書きと、出力JSONへの
+// sample_rate 追加フィールドの対象かどうか
 static bool codecSupportsPerEntryRate(CodecKind kind)
+{
+    switch (kind) {
+        case CodecKind::Ymz280Adpcm:
+        case CodecKind::Ymz280Pcm8:
+        case CodecKind::Ymz280Pcm16:
+        case CodecKind::Opl4Pcm8:
+        case CodecKind::Opl4Pcm12:
+        case CodecKind::Opl4Pcm16:
+        case CodecKind::Ssgs:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// CodecKind が params/出力JSON の 'format' フィールドを持つかどうか
+static bool codecHasFormat(CodecKind kind)
 {
     switch (kind) {
         case CodecKind::Ymz280Adpcm:
@@ -140,8 +199,8 @@ static Params loadParams(const std::string& jsonPath)
         throw std::runtime_error("Missing or invalid 'codec' field (string required)");
     p.codec = toLower(root["codec"].get<std::string>());
     if (p.codec != "adpcm-b" && p.codec != "adpcm-a" &&
-        p.codec != "ymz280"  && p.codec != "opl4")
-        throw std::runtime_error("'codec' must be 'adpcm-b' / 'adpcm-a' / 'ymz280' / 'opl4'");
+        p.codec != "ymz280"  && p.codec != "opl4" && p.codec != "ssgs")
+        throw std::runtime_error("'codec' must be 'adpcm-b' / 'adpcm-a' / 'ymz280' / 'opl4' / 'ssgs'");
 
     // --- format (ymz280 / opl4 のみ必須) ---
     if (p.codec == "ymz280" || p.codec == "opl4") {
@@ -168,6 +227,7 @@ static Params loadParams(const std::string& jsonPath)
     }
     if (p.codec == "adpcm-b") p.kind = CodecKind::AdpcmB;
     if (p.codec == "adpcm-a") p.kind = CodecKind::AdpcmA;
+    if (p.codec == "ssgs")    p.kind = CodecKind::Ssgs;
 
     // --- sample_rate ---
     // codec/format ごとの許容範囲。ADPCM-A は固定レートのため範囲チェック対象外。
@@ -193,6 +253,13 @@ static Params loadParams(const std::string& jsonPath)
         uint32_t sr = root["sample_rate"].get<uint32_t>();
         if (sr != 8000 && sr != 16000 && sr != 24000 && sr != 32000)
             throw std::runtime_error("ADPCM-B の sample_rate は 8000/16000/24000/32000 Hz のいずれかです");
+        p.sampleRate = sr;
+    } else if (p.codec == "ssgs") {
+        if (!root.contains("sample_rate") || !root["sample_rate"].is_number_integer())
+            throw std::runtime_error("Missing or invalid 'sample_rate' field (integer required)");
+        uint32_t sr = root["sample_rate"].get<uint32_t>();
+        if (!ssgs::isValidSampleRate(sr))
+            throw std::runtime_error("SSGS の sample_rate は 4000/8000/16000/32000 Hz のいずれかです");
         p.sampleRate = sr;
     } else {
         // ymz280 / opl4: 任意の整数値。codec/format ごとの範囲でのみ検証する。
@@ -429,11 +496,17 @@ static Params loadParams(const std::string& jsonPath)
             throw std::runtime_error(
                 "'" + entryPath + "' の sample_rate は整数で指定してください");
         uint32_t sr = item["sample_rate"].get<uint32_t>();
-        auto [lo, hi] = sampleRateRangeFor(p.kind);
-        if (sr < lo || sr > hi)
-            throw std::runtime_error(
-                "'" + entryPath + "' の sample_rate は " + std::to_string(lo) + "〜"
-                + std::to_string(hi) + " Hz の範囲で指定してください");
+        if (p.kind == CodecKind::Ssgs) {
+            if (!ssgs::isValidSampleRate(sr))
+                throw std::runtime_error(
+                    "'" + entryPath + "' の sample_rate は 4000/8000/16000/32000 Hz のいずれかです");
+        } else {
+            auto [lo, hi] = sampleRateRangeFor(p.kind);
+            if (sr < lo || sr > hi)
+                throw std::runtime_error(
+                    "'" + entryPath + "' の sample_rate は " + std::to_string(lo) + "〜"
+                    + std::to_string(hi) + " Hz の範囲で指定してください");
+        }
         outHasOverride = true;
         outOverride    = sr;
     };
@@ -468,6 +541,11 @@ static Params loadParams(const std::string& jsonPath)
     if (p.wavFiles.empty())
         throw std::runtime_error("'wav_files' が空です");
 
+    if (p.kind == CodecKind::Ssgs && p.wavFiles.size() > ssgs::MAX_VOICES)
+        throw std::runtime_error(
+            "SSGS の ADPCM ボイスは最大 " + std::to_string(ssgs::MAX_VOICES)
+            + " 音です (指定: " + std::to_string(p.wavFiles.size()) + " 音)");
+
     return p;
 }
 
@@ -478,6 +556,22 @@ static uint32_t alignUp(uint32_t value, uint32_t boundary)
 {
     uint32_t rem = value % boundary;
     return (rem == 0) ? value : value + (boundary - rem);
+}
+
+// ============================================================
+// SSGS ボイスアドレステーブルへの書き込み
+// 23bit アドレスを L(bit7-0) / M(bit15-8) / H(bit22-16) の
+// 3プレーンに分割して、ボイス番号をインデックスに格納する。
+// ============================================================
+static void writeSsgsVoiceTable(std::vector<uint8_t>& bin, uint32_t voiceNo,
+                                uint32_t startAddr, uint32_t endAddr)
+{
+    bin[ssgs::TBL_START_L + voiceNo] = static_cast<uint8_t>( startAddr        & 0xFF);
+    bin[ssgs::TBL_START_M + voiceNo] = static_cast<uint8_t>((startAddr >>  8) & 0xFF);
+    bin[ssgs::TBL_START_H + voiceNo] = static_cast<uint8_t>((startAddr >> 16) & 0x7F);
+    bin[ssgs::TBL_END_L   + voiceNo] = static_cast<uint8_t>( endAddr          & 0xFF);
+    bin[ssgs::TBL_END_M   + voiceNo] = static_cast<uint8_t>((endAddr   >>  8) & 0xFF);
+    bin[ssgs::TBL_END_H   + voiceNo] = static_cast<uint8_t>((endAddr   >> 16) & 0x7F);
 }
 
 // ============================================================
@@ -676,7 +770,7 @@ int main(int argc, char* argv[])
     }
 
     std::cout << "codec      : " << params.codec      << "\n";
-    if (codecSupportsPerEntryRate(params.kind))
+    if (codecHasFormat(params.kind))
         std::cout << "format     : " << params.format << "\n";
     std::cout << "sample_rate: " << params.sampleRate << " Hz\n";
     std::cout << "boundary   : " << params.boundary   << " bytes\n";
@@ -695,6 +789,8 @@ int main(int argc, char* argv[])
         case CodecKind::Opl4Pcm8:    encoder = std::make_unique<LinearPcm8Encoder>();   break;
         case CodecKind::Opl4Pcm12:   encoder = std::make_unique<Opl4Pcm12Encoder>();    break;
         case CodecKind::Opl4Pcm16:   encoder = std::make_unique<LinearPcm16BEEncoder>();break;
+        // SSGS の 4bit ADPCM は YMZ280B と同一フォーマット
+        case CodecKind::Ssgs:        encoder = std::make_unique<Ymz280AdpcmEncoder>();  break;
     }
 
     // --- 各WAVをエンコードしてバイナリに結合 ---
@@ -710,12 +806,21 @@ int main(int argc, char* argv[])
         uint32_t    loopStartByte;   // 出力バイナリ内の絶対バイトオフセット
         uint32_t    loopEndByte;     // 同上 (包含)
         std::string loopSource;
-        uint32_t    sampleRate;      // ymz280/opl4 のみ有効。そのエントリで実際に使ったレート
+        uint32_t    sampleRate;      // ymz280/opl4/ssgs のみ有効。そのエントリで実際に使ったレート
+        uint32_t    endAddress;      // 実データ末尾の絶対アドレス (包含)。ssgs のROMテーブル用
     };
+
+    const bool isSsgs = (params.kind == CodecKind::Ssgs);
 
     std::vector<EntryInfo> entries;
     std::vector<uint8_t>   binData;
     uint32_t               currentOffset = 0;
+
+    // SSGS はボイスアドレステーブルの分だけ先頭を空けておく (後段で書き込む)
+    if (isSsgs) {
+        binData.resize(ssgs::DATA_AREA_BASE, 0x00);
+        currentOffset = ssgs::DATA_AREA_BASE;
+    }
 
     for (auto& we : params.wavFiles) {
         std::cout << "  エンコード中: " << we.path << " ... ";
@@ -766,7 +871,16 @@ int main(int argc, char* argv[])
             return 1;
         }
 
-        uint32_t paddedSize = alignUp(adpcmSize, params.boundary);
+        uint32_t entryOffset = alignUp(currentOffset, params.boundary);
+        uint32_t paddedSize  = alignUp(adpcmSize, params.boundary);
+        uint32_t endAddress  = (adpcmSize > 0) ? (entryOffset + adpcmSize - 1) : entryOffset;
+
+        if (isSsgs && entryOffset + paddedSize - 1 > ssgs::MAX_ADDRESS) {
+            std::cerr << "\n[error] 出力サイズが SSGS の外部メモリ空間 (8Mbyte) を超えます: "
+                      << we.path << "\n";
+            delete[] pAdpcm;
+            return 1;
+        }
 
         // --- loop サンプル範囲 → バイトオフセット変換 ---
         // resampling() は 64サンプル境界まで無音パディングしてからエンコードするため、
@@ -782,8 +896,8 @@ int main(int argc, char* argv[])
             endSample   = std::min(loopDec.endSample,   totalResampledSamples > 0 ? totalResampledSamples - 1 : 0);
             if (totalResampledSamples > 0 && endSample > startSample) {
                 entryHasLoop = true;
-                loopStartByte = currentOffset + encoder->samplesToBytes(startSample);
-                loopEndByte   = currentOffset + encoder->samplesToBytes(endSample);
+                loopStartByte = entryOffset + encoder->samplesToBytes(startSample);
+                loopEndByte   = entryOffset + encoder->samplesToBytes(endSample);
             } else {
                 std::cerr << "[warn] loop 範囲がエンコード結果の範囲外のため無視します ("
                           << we.path << ")\n";
@@ -791,19 +905,30 @@ int main(int argc, char* argv[])
         }
 
         entries.push_back({
-            we.name, currentOffset, adpcmSize, paddedSize, rnd.midiNote,
+            we.name, entryOffset, adpcmSize, paddedSize, rnd.midiNote,
             entryHasLoop, startSample, endSample, loopStartByte, loopEndByte, loopDec.source,
-            entryRate
+            entryRate, endAddress
         });
 
+        binData.resize(entryOffset, 0x00); // boundary 整列によるギャップを埋める
         binData.insert(binData.end(), pAdpcm, pAdpcm + adpcmSize);
-        binData.resize(currentOffset + paddedSize, 0x00);
-        currentOffset += paddedSize;
+        binData.resize(entryOffset + paddedSize, 0x00);
+        currentOffset = entryOffset + paddedSize;
         delete[] pAdpcm;
 
         std::cout << "OK  (" << adpcmSize << " bytes -> padded " << paddedSize
                   << " bytes, offset 0x" << std::hex << entries.back().offset
                   << std::dec << ")\n";
+    }
+
+    // --- SSGS ボイスアドレステーブルの書き込み ---
+    if (isSsgs) {
+        for (size_t i = 0; i < entries.size(); ++i) {
+            writeSsgsVoiceTable(binData, static_cast<uint32_t>(i),
+                                entries[i].offset, entries[i].endAddress);
+        }
+        std::cout << "\nボイステーブル: " << entries.size() << " 音 / 最大 "
+                  << ssgs::MAX_VOICES << " 音\n";
     }
 
     // --- バイナリ出力 ---
@@ -823,14 +948,21 @@ int main(int argc, char* argv[])
     {
         json out;
         out["codec"]       = params.codec;
-        if (codecSupportsPerEntryRate(params.kind))
+        if (codecHasFormat(params.kind))
             out["format"] = params.format;
         out["sample_rate"] = params.sampleRate;
         out["boundary"]    = params.boundary;
         out["total_size"]  = static_cast<uint32_t>(binData.size());
+        if (isSsgs) {
+            char hexBase[16];
+            std::snprintf(hexBase, sizeof(hexBase), "0x%06X", ssgs::DATA_AREA_BASE);
+            out["data_area_offset"]     = ssgs::DATA_AREA_BASE;
+            out["data_area_offset_hex"] = hexBase;
+        }
 
         json arr = json::array();
-        for (auto& e : entries) {
+        for (size_t i = 0; i < entries.size(); ++i) {
+            const auto& e = entries[i];
             char hexOff[16], hexEnd[16];
             std::snprintf(hexOff, sizeof(hexOff), "0x%06X", e.offset);
             std::snprintf(hexEnd, sizeof(hexEnd), "0x%06X", e.offset + e.paddedSize - 1);
@@ -845,6 +977,17 @@ int main(int argc, char* argv[])
             entry["root_note"]   = e.rootNote;
             if (codecSupportsPerEntryRate(params.kind))
                 entry["sample_rate"] = e.sampleRate;
+            if (isSsgs) {
+                // ROM のボイスアドレステーブルに書き込んだ値と同じもの
+                char hexEndAddr[16];
+                std::snprintf(hexEndAddr, sizeof(hexEndAddr), "0x%06X", e.endAddress);
+                entry["voice_no"]          = static_cast<uint32_t>(i);
+                entry["start_address"]     = e.offset;
+                entry["start_address_hex"] = hexOff;
+                entry["end_address"]       = e.endAddress;
+                entry["end_address_hex"]   = hexEndAddr;
+                entry["sampling_code"]     = ssgs::samplingCode(e.sampleRate);
+            }
             if (e.hasLoop) {
                 char hexLoopStart[16], hexLoopEnd[16];
                 std::snprintf(hexLoopStart, sizeof(hexLoopStart), "0x%06X", e.loopStartByte);
