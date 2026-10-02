@@ -109,6 +109,29 @@ inline int samplingCode(uint32_t sr)
 }
 } // namespace ssgs
 
+// ============================================================
+// 1サンプルの再生範囲がまたげないアドレス境界 (size == 0 は制約なし)
+// ============================================================
+struct SampleBank {
+    uint32_t    size;
+    const char* label; // メッセージ表示用
+};
+
+static SampleBank sampleBankFor(CodecKind kind)
+{
+    switch (kind) {
+        // Y8950/YM2608 の ADPCM メモリは 256Kbit×1bit DRAM を 1〜8 個つなぐ構成で、
+        // アドレス上位3bit (BANK) がチップセレクトになる。チップ境界をまたげない
+        // ものとして扱う (BANK=チップセレクトからの解釈。ユーザー判断)。
+        // codec を共有する YM2610 も区別せず、常にこの規則で配置する。
+        case CodecKind::AdpcmB: return {0x8000,   "32KB (DRAM 1チップ分)"};
+        // START/END ADDR H の D7-D4 (ROM アドレス bit23-20) は start と end で
+        // 同じ値でなければならない
+        case CodecKind::AdpcmA: return {0x100000, "1MB"};
+        default:                return {0, ""};
+    }
+}
+
 // CodecKind が per-entry sample_rate 上書きと、出力JSONへの
 // sample_rate 追加フィールドの対象かどうか
 static bool codecSupportsPerEntryRate(CodecKind kind)
@@ -162,6 +185,7 @@ struct Params {
     std::string           format;      // ymz280/opl4 のときのみ有効な値を保持
     uint32_t              sampleRate = 0;
     uint32_t              boundary   = 0;
+    uint32_t              memorySize = 0; // 0 = 未指定 (上限チェックなし)
     std::string           outputBin;
     std::string           outputJson;
     std::vector<WavEntry> wavFiles;
@@ -282,6 +306,14 @@ static Params loadParams(const std::string& jsonPath)
         if (b != 32 && b != 256)
             throw std::runtime_error("'boundary' は 32 または 256 を指定してください");
         p.boundary = b;
+    }
+
+    // --- memory_size (省略可) ---
+    if (root.contains("memory_size")) {
+        const auto& m = root["memory_size"];
+        if (!m.is_number_unsigned() || m.get<uint64_t>() == 0 || m.get<uint64_t>() > 0xFFFFFFFFu)
+            throw std::runtime_error("'memory_size' は 1〜4294967295 の整数 (バイト数) で指定してください");
+        p.memorySize = m.get<uint32_t>();
     }
 
     // --- output_bin ---
@@ -774,6 +806,8 @@ int main(int argc, char* argv[])
         std::cout << "format     : " << params.format << "\n";
     std::cout << "sample_rate: " << params.sampleRate << " Hz\n";
     std::cout << "boundary   : " << params.boundary   << " bytes\n";
+    if (params.memorySize > 0)
+        std::cout << "memory_size: " << params.memorySize << " bytes\n";
     std::cout << "output_bin : " << params.outputBin  << "\n";
     std::cout << "output_json: " << params.outputJson << "\n";
     std::cout << "wav files  : " << params.wavFiles.size() << " file(s)\n\n";
@@ -810,7 +844,8 @@ int main(int argc, char* argv[])
         uint32_t    endAddress;      // 実データ末尾の絶対アドレス (包含)。ssgs のROMテーブル用
     };
 
-    const bool isSsgs = (params.kind == CodecKind::Ssgs);
+    const bool       isSsgs     = (params.kind == CodecKind::Ssgs);
+    const SampleBank sampleBank = sampleBankFor(params.kind);
 
     std::vector<EntryInfo> entries;
     std::vector<uint8_t>   binData;
@@ -873,11 +908,40 @@ int main(int argc, char* argv[])
 
         uint32_t entryOffset = alignUp(currentOffset, params.boundary);
         uint32_t paddedSize  = alignUp(adpcmSize, params.boundary);
+
+        // boundary (32/256) はバンクサイズの約数なので、パディング込みの範囲で
+        // 判定しても実データの範囲で判定しても結果は同じになる
+        if (sampleBank.size > 0 && paddedSize > 0) {
+            if (paddedSize > sampleBank.size) {
+                std::cerr << "\n[error] " << params.codec << " の1サンプルは " << sampleBank.label
+                          << " 以下にしてください: " << we.path
+                          << " (padded " << paddedSize << " bytes)\n";
+                delete[] pAdpcm;
+                return 1;
+            }
+            const uint32_t lastByte = entryOffset + paddedSize - 1;
+            if (entryOffset / sampleBank.size != lastByte / sampleBank.size) {
+                const uint32_t moved = alignUp(entryOffset, sampleBank.size);
+                std::cout << "\n    [align] " << sampleBank.label << " 境界をまたぐため 0x"
+                          << std::hex << entryOffset << " -> 0x" << moved << std::dec << " へ移動 ";
+                entryOffset = moved;
+            }
+        }
+
         uint32_t endAddress  = (adpcmSize > 0) ? (entryOffset + adpcmSize - 1) : entryOffset;
 
         if (isSsgs && entryOffset + paddedSize - 1 > ssgs::MAX_ADDRESS) {
             std::cerr << "\n[error] 出力サイズが SSGS の外部メモリ空間 (8Mbyte) を超えます: "
                       << we.path << "\n";
+            delete[] pAdpcm;
+            return 1;
+        }
+
+        if (params.memorySize > 0 &&
+            static_cast<uint64_t>(entryOffset) + paddedSize > params.memorySize) {
+            std::cerr << "\n[error] 出力サイズが memory_size (" << params.memorySize
+                      << " bytes) を超えます: " << we.path << " (配置末尾 0x" << std::hex
+                      << (entryOffset + paddedSize - 1) << std::dec << ")\n";
             delete[] pAdpcm;
             return 1;
         }

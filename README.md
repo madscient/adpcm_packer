@@ -73,6 +73,7 @@ adpcm_packer <params.json>
                                    // ymz280/opl4: format 節の範囲内で任意の整数Hz
                                    // ssgs: 4000/8000/16000/32000 Hz
   "boundary":    256,              // バウンダリ境界: 32 または 256 バイト
+  "memory_size": 262144,           // 接続メモリの容量 [バイト]（省略可。超えたらエラー）
   "output_bin":  "output.bin",     // 出力バイナリファイルパス
   "output_json": "output.json",    // 出力オフセット一覧 JSON パス
   "wav_files": [
@@ -141,11 +142,37 @@ adpcm_packer <params.json>
 
 | 値 | 用途例 |
 |---|---|
-| `32`  | ADPCM-A (YM2610 は 32 byte 境界) |
-| `256` | ADPCM-B (YM2608/YM2610 は 256 byte 境界)、YMZ280B、OPL4 |
+| `32`  | YM2608 の ADPCM-B（アドレス指定の最小単位が 32 byte 以下） |
+| `256` | YM2610 の ADPCM-A / ADPCM-B（アドレス指定の単位が 256 byte）、YMZ280B、OPL4 |
 
 `ssgs` はアドレステーブルで任意のバイトアドレスを指定できるため、
 どちらの値も使用できます。
+
+### adpcm-a / adpcm-b のサンプル配置
+
+1 つのサンプルが次のアドレス境界をまたがないように配置します。
+
+| codec | 境界 | 理由 |
+|---|---|---|
+| `adpcm-b` | 32KB（`0x8000` の倍数） | YM2608 の ADPCM メモリは 256Kbit（32KB）の DRAM を 1〜8 個つなぐ構成のため、DRAM チップの境界をまたがないようにする |
+| `adpcm-a` | 1MB（`0x100000` の倍数） | YM2610 の ADPCM-A は、スタートアドレスとエンドアドレスの ROM アドレス bit23〜20 が同じでなければならない |
+
+- 境界をまたぐエントリは次の境界の先頭へ移動し、間は `0x00` で埋めます。
+  `wav_files` の並び順と出力 JSON の並び順は変わりません。
+- `padded_size` が境界の大きさを超えるサンプルはエラーになります。
+  `adpcm-b` の場合、32000 Hz で約 2.0 秒、16000 Hz で約 4.1 秒が上限の目安です。
+- `adpcm-b` は YM2610 向けに使う場合も同じ規則で配置します。
+
+### memory_size（省略可）
+
+接続するメモリの容量をバイト数で指定します。配置したデータがこの容量に
+収まらない場合はエラーになります。省略した場合は容量を検査しません。
+すべての codec で指定できます。
+
+例: YM2608 に 256Kbit DRAM を 8 個つないだ構成（256KB）なら
+`"memory_size": 262144`。
+
+`ssgs` は、指定が無くても外部メモリ空間（8MB）を超える出力をエラーにします。
 
 ### ssgs (YMZ705 / YMZ732) の ROM イメージ
 
@@ -478,6 +505,9 @@ adpcm_packer/
     ├── test_basic_adpcm_a.json
     ├── test_basic_adpcm_b.json
     ├── test_boundary_32.json
+    ├── test_adpcm_a_1mb_boundary.json
+    ├── test_adpcm_b_chip_boundary.json
+    ├── test_memory_size.json
     ├── test_loop.json
     ├── test_octave.json
     ├── test_rootnote_auto.json

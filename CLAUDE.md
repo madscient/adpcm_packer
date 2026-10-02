@@ -38,6 +38,7 @@ cmake --build build
 `完了。` が出力され、`[error]` が出ないことを目視確認するのが現状の方法。
 
 ```bash
+mkdir -p output   # ツールは出力ディレクトリを作らない
 for f in test/test_*.json; do
   echo "=== $f ==="
   ./build/adpcm_packer "$f"
@@ -112,6 +113,17 @@ src/
   (`Ymz280AdpcmEncoder`)。ヘッダ領域があるぶん先頭ボイスのオフセットが
   boundary の倍数とは限らないため、各エントリのオフセットは
   `alignUp(currentOffset, boundary)` で都度求めている。
+- `adpcm-b` / `adpcm-a` のサンプル配置: 1サンプルが `sampleBankFor()` の
+  境界 (`adpcm-b` 32KB = YM2608 の 256Kbit DRAM 1チップ分、`adpcm-a` 1MB =
+  START/END ADDR H の D7-D4 一致要件) をまたがないよう、またぐエントリは次の
+  境界の先頭へ移動し、境界サイズを超えるサンプルはエラーにする。`adpcm-b` は
+  YM2610 でも区別せず常にこの規則で配置する (ユーザー判断。YM2610 の ADPCM-B
+  自体は連続16MBを扱える)。ループ点のバイトオフセットは移動後の
+  `entryOffset` から計算するので、配置を変える処理はループ点計算より前に置く。
+- `memory_size`: 全 codec 共通の任意パラメータ (バイト数)。`Params::memorySize`
+  の 0 は未指定。超えたらエラー。**出力JSONには意図的に出さない** (ユーザー
+  判断。入力の検査にだけ使う値のため)。「変更時の注意」の4箇所のうち
+  出力JSON・出力スキーマは対象外。
 - `root_note`: 整数(0-127) / ノート名文字列("C-1"〜"G9") / `"auto"`
   (YIN推定) / `"none"`・省略(デフォルト69) の4系統を受け付ける。
   パースは `main.cpp` の `parseRootNoteField` ラムダと `noteNameToMidi`

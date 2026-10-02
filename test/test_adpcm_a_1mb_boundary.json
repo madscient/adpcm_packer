@@ -1,0 +1,32 @@
+{
+  "codec": "adpcm-a",
+  "boundary": 256,
+  "output_bin": "output/test_adpcm_a_1mb_boundary.bin",
+  "output_json": "output/test_adpcm_a_1mb_boundary.json",
+  "wav_files": [
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav", "test/wav/test_loop_auto.wav",
+    { "path": "test/wav/test_loop_auto.wav", "name": "moved_to_bank1" },
+    { "path": "test/wav/test_loop_auto.wav", "name": "bank1_b" }
+  ]
+}

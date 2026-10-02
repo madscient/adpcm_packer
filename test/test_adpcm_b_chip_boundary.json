@@ -1,0 +1,17 @@
+{
+  "codec": "adpcm-b",
+  "sample_rate": 32000,
+  "boundary": 256,
+  "output_bin": "output/test_adpcm_b_chip_boundary.bin",
+  "output_json": "output/test_adpcm_b_chip_boundary.json",
+  "wav_files": [
+    { "path": "test/wav/test_1khz_48000_mono.wav", "name": "chip0_a" },
+    { "path": "test/wav/test_1khz_48000_mono.wav", "name": "chip0_b" },
+    { "path": "test/wav/test_1khz_48000_mono.wav", "name": "chip0_c" },
+    { "path": "test/wav/test_1khz_48000_mono.wav", "name": "chip0_d" },
+    { "path": "test/wav/test_1khz_48000_mono.wav", "name": "chip0_e" },
+    { "path": "test/wav/test_1khz_48000_mono.wav", "name": "chip0_f" },
+    { "path": "test/wav/test_1khz_48000_mono.wav", "name": "moved_to_chip1" },
+    { "path": "test/wav/test_1khz_48000_mono.wav", "name": "chip1_b" }
+  ]
+}

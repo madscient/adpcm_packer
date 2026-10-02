@@ -1,6 +1,6 @@
 {
   "codec": "adpcm-a",
-  "boundary": 32,
+  "boundary": 256,
   "output_bin": "output/test_basic_adpcm_a.bin",
   "output_json": "output/test_basic_adpcm_a.json",
   "wav_files": [

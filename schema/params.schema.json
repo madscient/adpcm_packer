@@ -26,6 +26,12 @@
       "enum": [32, 256],
       "description": "各エントリのパディング境界(バイト)。"
     },
+    "memory_size": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295,
+      "description": "接続メモリの容量(バイト)。省略可。指定すると、出力がこの容量を超えた時点でエラーにする。全codec共通。"
+    },
     "output_bin": {
       "type": "string",
       "minLength": 1,

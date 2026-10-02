@@ -1,0 +1,14 @@
+{
+  "codec": "ymz280",
+  "format": "adpcm",
+  "sample_rate": 16000,
+  "boundary": 256,
+  "memory_size": 8704,
+  "output_bin": "output/test_memory_size.bin",
+  "output_json": "output/test_memory_size.json",
+  "wav_files": [
+    "test/wav/test_440hz_44100_mono.wav",
+    "test/wav/test_880hz_22050_stereo.wav",
+    "test/wav/test_1khz_48000_mono.wav"
+  ]
+}
