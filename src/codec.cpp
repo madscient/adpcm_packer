@@ -163,7 +163,9 @@ int YmDeltaTEncoder::encode(short* pSrc, unsigned char* pDis, DWORD iSampleSize)
 
     for (DWORD iCnt = 0; iCnt < iSampleSize; ++iCnt) {
         long dn = static_cast<long>(*pSrc++) - xn;
-        long i  = (std::abs(dn) << 16) / (stepSize << 14);
+        // Windows では long が 32bit で、|dn| >= 32768 のとき << 16 が桁あふれする
+        long i  = static_cast<long>((static_cast<int64_t>(std::abs(dn)) << 16)
+                                    / (static_cast<int64_t>(stepSize) << 14));
         if (i > 7) i = 7;
 
         unsigned char adpcm = static_cast<unsigned char>(i);
@@ -175,6 +177,10 @@ int YmDeltaTEncoder::encode(short* pSrc, unsigned char* pDis, DWORD iSampleSize)
         } else {
             xn += delta;
         }
+        // デコーダ実装 (ymfm・MAME) は累算値を1ステップごとに 16bit へ飽和させる。
+        // 同じ値を追わないと予測値がデコード結果からずれる
+        if (xn < -32768) xn = -32768;
+        if (xn > 32767)  xn = 32767;
 
         stepSize = (stepsizeTable[adpcm] * stepSize) / 64;
         if (stepSize < 127)   stepSize = 127;
@@ -315,7 +321,9 @@ int Ymz280AdpcmEncoder::encode(short* pSrc, unsigned char* pDis, DWORD iSampleSi
     for (DWORD iCnt = 0; iCnt < iSampleSize; ++iCnt) {
         // 精度を落としてノイズを低減する (superctr/adpcm 実装のコメントより)
         long diffIn = (static_cast<long>(*pSrc++) & ~7L) - history;
-        long adpcmU = (std::abs(diffIn) << 16) / (stepSize << 14);
+        // Windows では long が 32bit で、|diffIn| >= 32768 のとき << 16 が桁あふれする
+        long adpcmU = static_cast<long>((static_cast<int64_t>(std::abs(diffIn)) << 16)
+                                        / (static_cast<int64_t>(stepSize) << 14));
         if (adpcmU > 7) adpcmU = 7;
         unsigned char adpcm = static_cast<unsigned char>(adpcmU);
         if (diffIn < 0) adpcm |= 0x8;

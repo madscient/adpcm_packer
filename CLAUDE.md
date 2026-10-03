@@ -61,6 +61,9 @@ done
   - MSVC は `/W4 /WX` で警告をエラー扱いしている。`std::transform` +
     `::tolower` のような int→char の暗黙縮小変換に注意（過去に C4244 で
     ビルドを壊した実績あり。ラムダで `static_cast<char>` すること）
+  - `long` は MSVC (Windows) では 32bit、Linux/macOS では 64bit。シフトを
+    含む演算は Windows でだけ桁あふれすることがあり、警告も出ない。値域が
+    16bit を超えうる式は `int64_t` で計算すること
   - `-Wall -Wextra -Wpedantic -Werror` も GCC/Clang 側で有効
   - 日本語文字列を含むためMSVCビルドには `/utf-8` が必須
     （CMakeLists.txt に設定済み。削除しないこと）
@@ -70,7 +73,14 @@ done
 - `codec.h` / `codec.cpp` はレガシー移植コード（元は Windows/MFC 環境の
   C++）。エンコードアルゴリズム自体（YmDeltaTEncoder, Ym2610AEncoder）は
   実機互換性が最重要なので、ロジックを変更しないこと。安全なリファクタ
-  （Windows型の除去、初期化の明示化など）は実施済み。
+  （Windows型の除去、初期化の明示化など）は実施済み。例外として次の2点を
+  直している（いずれもユーザー承認済み。経緯と検証は `docs/handoff.md`）:
+  - YmDeltaTEncoder / Ymz280AdpcmEncoder の量子化式 `(|差分| << 16) /
+    (stepSize << 14)` を 64bit で計算する（32bit `long` の桁あふれで出力が
+    化け、ADPCM-B では範囲外読みにより実行ごとに出力が変わっていた）。
+  - YmDeltaTEncoder の予測値 `xn` を 1 ステップごとに [-32768, 32767] へ
+    クランプする（デコーダ実装が累算値を飽和させるため。外すと予測値が
+    デコード結果からずれる）。
 
 ## アーキテクチャ
 
